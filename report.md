@@ -53,7 +53,7 @@ Results are in [`test_results.csv`](test_results.csv), from a full run of `quote
 | Lines declined because less than 50% could be ready by the deadline | 4 |
 | Lines declined because nothing could be ready by the deadline | 6 |
 | Lines declined because the item is not carried | 11 (mostly A3/A5 paper; also balloons, cardboard, tickets) |
-| Approved lines left unsold | 0 (request 18's line was skipped, then sold by the follow-up) |
+| Approved lines left unsold | 0 (lines skipped in requests 7 and 18 were sold by the follow-up) |
 | Final replies failing the reply check | 0 (5 rewritten, all on the first attempt) |
 | Sales priced exactly at cost × 1.25 less the bulk discount | 39 / 39 |
 | Sales below cost | 0 |
@@ -102,7 +102,7 @@ Results are in [`test_results.csv`](test_results.csv), from a full run of `quote
 ### Weaknesses
 
 - **Many lines are only partly filled (12 of 60).** Supplier lead time is fixed by `get_supplier_delivery_date`, and only about 40% of catalog items start in stock, so later requests with April 15 deadlines can only be partly met.
-- **The agents still need correcting.** In this run 5 of 20 first-draft replies failed the reply check, all by presenting a partial line as complete, and the orchestrator skipped request 18's approved line, which the unsold-line follow-up then sold. Across recent runs, 5 to 7 replies a run needed a rewrite. The Python follow-ups caught every case, but they add LLM calls, and they only check what they're written to check, not, for example, delivery dates or per-line prices.
+- **The agents still need correcting.** In this run 5 of 20 first-draft replies failed the reply check, mostly by presenting a partial line as complete (one left out the total, and one asked the customer to confirm after the sale), and the orchestrator skipped approved lines in requests 7 and 18, which the unsold-line follow-up then sold. Across recent runs, 5 to 7 replies a run needed a rewrite. The Python follow-ups caught every case, but they add LLM calls, and they only check what they're written to check, not, for example, delivery dates or per-line prices.
 - **Matching is a heuristic.** It uses word overlap, a main-noun bonus and a few aliases, tuned on the sample wording. Brand names or unusual wording would need new aliases, and attributes like "recycled" or "white" are ignored.
 - **Some behavior still relies on the LLM following instructions,** such as copying the customer's wording verbatim and always selling available items. The tool guards prevent wrong sales, but they can't force a sale the agent skips.
 

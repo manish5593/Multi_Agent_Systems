@@ -266,11 +266,12 @@ for a per-request table.
     under 50% ready by deadline:     4 (declined)
     nothing ready by the deadline:   6
     not carried:                     11 (mostly A3/A5 paper)
-  Unsold-line follow-ups:            1 (request 18; the line was then sold)
+  Unsold-line follow-ups:            2 (requests 7 and 18; both lines were
+                                     then sold)
   Replies rewritten after the
   reply check:                       5, all passing on the first rewrite
-  New read-only tools used:          list_inventory 7 times,
-                                     financial_summary 19 times
+  New read-only tools used:          list_inventory 4 times,
+                                     financial_summary 20 times
   Final replies failing the check:   0
   Sales priced exactly at cost x 1.25
   less the bulk discount:            39 of 39
