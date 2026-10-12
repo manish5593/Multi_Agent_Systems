@@ -58,7 +58,7 @@ find_catalog_items(description)
   paper, "poster board" -> Large poster paper (24x36 inches)). A paper size the
   catalog does not stock (e.g. A3, A5) returns "we do not carry" rather than
   fuzzy-matching to A4 paper. Returns up to 5 candidates with exact names and
-  unit prices.
+  customer list prices.
 
 check_availability(item_name, quantity)                       [read-only]
   If current stock covers the quantity, the item is ready on the request date.
@@ -69,8 +69,11 @@ check_availability(item_name, quantity)                       [read-only]
   quantity in the request context.
 
 price_line_item(item_name, quantity)
-  Catalog unit price minus the bulk discount:
+  List price (catalog unit price + 25% markup) minus the bulk discount:
     100+ units: 5%     500+ units: 10%     1000+ units: 15%
+  The catalog unit price is the supplier's price, used for restock costs and
+  inventory value. After the largest discount, customers still pay
+  1.25 x 0.85 = 1.0625 x cost, so every sale is profitable.
 
 search_past_quotes(search_terms)
   Wraps search_quote_history to return up to 5 similar historical quotes.
@@ -123,23 +126,31 @@ e) Reams are converted to sheets in Python, before any agent runs.
    once 500 reams were restocked as 250,000 sheets but charged as 500 sheets,
    and later the orchestrator skipped the conversion entirely.
 
-h) Tool calls run one at a time.
+f) Tool calls run one at a time.
    smolagents runs an agent's tool calls in parallel threads by default.
    Parallel record_sale calls wrote to SQLite concurrently, and in one run the
    database file was corrupted ("database disk image is malformed").
    Every agent now uses max_tool_threads=1, and record_sale also holds a lock
    around its check-then-write.
 
-i) Unstocked paper sizes are not matched.
+g) Unstocked paper sizes are not matched.
    "A3 paper" fuzzy-matched to "A4 paper", and the agents sold A4 as a
    substitute. find_catalog_items now rejects A-series sizes the catalog does
    not stock.
 
-f) Inventory tracking for new items.
+h) Inventory tracking for new items.
    When a catalog item that was not in the starting inventory is reordered, it
    is added to the inventory table so the financial report values it.
 
-g) Starter code fixes.
+i) A 25% markup over the supplier price.
+   Originally customers paid the catalog price minus a bulk discount, while
+   restocking cost the full catalog price, so every discounted sale of
+   restocked stock lost money (one run's 250,000-sheet order cost $10,004 to
+   restock and sold for $8,500). Any markup above 17.6% keeps the 15% tier
+   profitable; 25% leaves a margin of at least 6.25%. It is MARKUP_RATE in
+   project_starter.py.
+
+j) Starter code fixes.
    run_test_scenarios() called init_database() without its required argument
    and printed an undefined `response`; both are fixed. One failed request is
    caught and logged so the run continues.
@@ -150,54 +161,51 @@ g) Starter code fixes.
 All 20 requests in quote_requests_sample.csv were processed without crashes,
 and the database passed SQLite's integrity check afterwards.
 
-  Requests with at least one sale:   15 of 20
-  Requests with no sale:             5. In four (13, 15, 16, 18) nothing
-                                     requested could be ready by the
-                                     deadline or was in the catalog. In
-                                     request 19 cardstock was available but
-                                     not sold (see Known Limitations).
+  Requests with at least one sale:   16 of 20
+  Requests with no sale:             4 (9, 13, 15, 18). Nothing requested
+                                     could be ready by the deadline or was
+                                     in the catalog.
+  Sales priced exactly at cost x 1.25
+  less the bulk discount:            34 of 34
+  Sales below cost:                  0
   Stock orders without a sale:       0
   Items with negative stock:         0
-  Items sold as substitutes for an
-  uncatalogued item (e.g. A3):       0
   Replies revealing stock levels,
-  costs or cash:                     0
+  costs, markup or cash:             0
   Replies asking the customer to
   confirm instead of selling:        0
   Sales blocked by the approval
-  guard:                             1 (request 19)
+  guard:                             6. Each was the sales agent trying a
+                                     different catalog item than the one
+                                     approved for that line; the approved
+                                     item was sold instead.
 
   Starting position:  cash $45,059.70, inventory $4,940.30, total $50,000.00
-  Final position:     cash $43,551.03, inventory $4,478.90, total $48,029.93
+  Final position:     cash $46,524.83, inventory $4,483.90, total $51,008.73
 
 Typical outcomes:
   - Fulfilled from stock with bulk discount (request 1: 200 glossy, 100
-    cardstock, 100 colored paper for $61.75).
+    cardstock, 100 colored paper for $77.19).
   - Fulfilled via supplier reorder ready by the deadline, with reams
-    converted (request 3: 10,000 sheets of A4 paper for $425.00 and 500 reams
-    = 250,000 sheets of Standard copy paper for $8,500.00, both ready
+    converted (request 3: 10,000 sheets of A4 paper for $531.25 and 500 reams
+    = 250,000 sheets of Standard copy paper for $10,625.00, both ready
     2025-04-11; A3 paper declined as not carried).
-  - Partially fulfilled (request 14: 500 sheets of cardstock sold; A4 and
-    poster paper could not arrive by the deadline).
+  - Partially fulfilled (request 14: 500 sheets of cardstock sold for $84.38;
+    A4 and poster paper could not arrive by the deadline).
   - Declined because the supplier cannot deliver before the deadline
     (request 13: April 10 deadline, earliest delivery April 12).
 
 
 6. KNOWN LIMITATIONS AND POSSIBLE IMPROVEMENTS
 ----------------------------------------------
-- Pricing loses money on restocked bulk orders. Supplier reorders cost the
-  catalog unit price (as in the starter data), and customers pay that price
-  minus a bulk discount. Total assets fell by $1,970 over the test run, most
-  of it from request 3 (250,000 sheets cost $10,004 to restock and sold for
-  $8,500). Adding a markup or a lower supplier cost would fix this.
-- Catalog matching is imperfect: request 12 asked for "colorful cardstock"
-  and was sold Colored paper ($19.00; Cardstock would have been $28.50), and
-  the reply still called it "colorful cardstock". An LLM-ranked or
-  embedding-based match would help.
-- Request 19: the inventory agent approved Cardstock, but the sales agent
-  tried to sell "250 gsm cardstock" instead. The approval guard correctly
-  blocked it, but the agent did not retry with the approved item, so nothing
-  was sold.
+- Catalog matching is imperfect. Request 12 asked for "colorful cardstock"
+  and was sold Colored paper ($23.75; Cardstock would have been $35.62), and
+  the reply still called it "colorful cardstock". Request 6's "colorful
+  construction paper" was likewise sold as Colored paper rather than
+  Construction paper. An LLM-ranked or embedding-based match would help.
+- If the sales agent tries a different item than the one approved, the
+  guard blocks it; the agent usually retries with the approved item, but in
+  one earlier run it did not and an available item went unsold.
 - The transaction IDs returned by the starter's create_transaction are
   unreliable (it reads last_insert_rowid() on whichever pooled connection it
   gets), so tool messages sometimes show repeated IDs. The stored rows are

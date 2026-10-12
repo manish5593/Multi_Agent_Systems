@@ -619,6 +619,9 @@ DEFAULT_MIN_STOCK_LEVEL = 100
 _db_write_lock = threading.Lock()
 # (minimum quantity, discount rate), checked from largest tier down
 BULK_DISCOUNT_TIERS = [(1000, 0.15), (500, 0.10), (100, 0.05), (0, 0.0)]
+# Catalog unit_price is what the supplier charges us; customers pay it plus this markup.
+# 25% keeps the largest bulk discount profitable: 1.25 * 0.85 = 1.0625 of cost.
+MARKUP_RATE = 0.25
 
 
 # The date and delivery deadline of the request being processed. Set by call_multi_agent_system
@@ -703,9 +706,14 @@ def _bulk_discount_rate(quantity: int) -> float:
     return 0.0
 
 
+def _list_price(item_name: str) -> float:
+    """Customer price per unit before any discount."""
+    return round(CATALOG[item_name]["unit_price"] * (1 + MARKUP_RATE), 4)
+
+
 def _price_line(item_name: str, quantity: int) -> Dict:
     """Price one line with the bulk discount. Used by both quoting and sales so they always agree."""
-    unit_price = CATALOG[item_name]["unit_price"]
+    unit_price = _list_price(item_name)
     discount_rate = _bulk_discount_rate(quantity)
     discounted_unit_price = unit_price * (1 - discount_rate)
     return {
@@ -734,7 +742,7 @@ def find_catalog_items(description: str) -> str:
         description: The customer's wording for the item, e.g. "A4 glossy paper" or "heavy cardstock".
 
     Returns:
-        A JSON list of up to 5 candidate items with their exact item_name, category and unit_price,
+        A JSON list of up to 5 candidate items with their exact item_name, category and list_price,
         or a message saying nothing in the catalog matches.
     """
     query = description.lower()
@@ -758,7 +766,10 @@ def find_catalog_items(description: str) -> str:
     scored.sort(key=lambda pair: pair[0], reverse=True)
     if not scored:
         return f"No catalog item matches '{description}'. We do not sell this item."
-    return json.dumps([item for _, item in scored[:5]])
+    return json.dumps([
+        {"item_name": item["item_name"], "category": item["category"], "list_price": _list_price(item["item_name"])}
+        for _, item in scored[:5]
+    ])
 
 
 def _plan_fulfillment(item_name: str, quantity: int) -> Dict:
@@ -832,7 +843,7 @@ def search_past_quotes(search_terms: list) -> str:
 @tool
 def price_line_item(item_name: str, quantity: int) -> str:
     """
-    Calculate the price of one line of a quote, including the bulk discount.
+    Calculate the customer price of one line of a quote, including the bulk discount.
     Discount tiers: 100+ units 5%, 500+ units 10%, 1000+ units 15%.
 
     Args:

@@ -75,10 +75,11 @@
   <text x="406" y="477" class="box-text">Prices each available item</text>
   <text x="406" y="494" class="box-text">with bulk discounts</text>
   <text x="406" y="522" class="tool">price_line_item</text>
-  <text x="406" y="538" class="small">5% at 100+, 10% at 500+, 15% at 1000+ units</text>
-  <text x="406" y="562" class="tool">search_past_quotes</text>
-  <text x="406" y="578" class="small">similar historical quotes for context</text>
-  <text x="406" y="602" class="tool">find_catalog_items</text>
+  <text x="406" y="538" class="small">list price = supplier cost + 25% markup,</text>
+  <text x="406" y="553" class="small">less 5% at 100+, 10% at 500+, 15% at 1000+</text>
+  <text x="406" y="577" class="tool">search_past_quotes</text>
+  <text x="406" y="593" class="small">similar historical quotes for context</text>
+  <text x="406" y="615" class="tool">find_catalog_items</text>
 
   <rect x="740" y="430" width="320" height="200" rx="10" fill="#fdf2f8" stroke="#db2777" stroke-width="1.5"/>
   <text x="756" y="457" class="box-title">Sales agent</text>
