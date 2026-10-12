@@ -62,7 +62,9 @@ check_availability(description, quantity)                     [read-only]
   quantity: current stock plus the largest affordable supplier order that
   still arrives by the deadline (supplier lead time depends on order size:
   up to 10 units same day, 100 one day, 1,000 four days, more seven days),
-  keeping the minimum stock level as a buffer. It writes nothing to the
+  keeping the minimum stock level as a buffer. A partial quantity is only
+  offered if it is at least half the request (MIN_PARTIAL_FRACTION = 0.5);
+  below that the line is declined. It writes nothing to the
   database, but records an approval for the matched item and the full or
   partial quantity, and remembers which item the description matched.
 
@@ -185,7 +187,9 @@ j) Partial fulfillment.
    quoted (with the discount tier for that quantity) and sold, and the reply
    tells the customer how many of the requested units will be supplied. The
    remainder is declined, not backordered, because the customer needs the
-   items by the deadline.
+   items by the deadline. Partial lines below half the requested quantity
+   are declined: without a minimum, one run sold 135 of 10,000 sheets, which
+   is unlikely to help a customer planning an event.
 
 k) Starter code fixes.
    run_test_scenarios() called init_database() without its required argument
@@ -199,27 +203,27 @@ All 20 requests in quote_requests_sample.csv were processed without crashes,
 and the database passed SQLite's integrity check afterwards. See report.md
 for a per-request table.
 
-  Requests with at least one sale:   20 of 20
+  Requests with at least one sale:   18 of 20
   Requested lines checked:           60
-    filled in full:                  32
-    filled in part:                  12 (e.g. request 14: 865 of 5,000
-                                     sheets of A4 paper by the deadline)
+    filled in full:                  33
+    filled in part:                  5 (e.g. request 14: 1,000 of 2,000
+                                     sheets of poster paper), plus 1
+                                     approved but not sold (request 18)
+    under 50% ready by deadline:     5 (declined)
     nothing ready by the deadline:   5
     not carried:                     11 (mostly A3/A5 paper)
   Sales priced exactly at cost x 1.25
-  less the bulk discount:            44 of 44
+  less the bulk discount:            38 of 38
   Sales below cost:                  0
   Stock orders without a sale:       0
   Items with negative stock:         0
-  Quotes/sales rejected as not
-  approved:                          0
+  Duplicate sales blocked by the
+  approval guard:                    4 (request 16)
   Replies revealing stock levels,
   costs, markup or cash:             0
-  Replies asking the customer to
-  confirm instead of selling:        0
 
   Starting position:  cash $45,059.70, inventory $4,940.30, total $50,000.00
-  Final position:     cash $46,730.70, inventory $4,333.85, total $51,064.55
+  Final position:     cash $46,683.81, inventory $4,358.65, total $51,042.46
 
 
 6. KNOWN LIMITATIONS AND POSSIBLE IMPROVEMENTS
@@ -233,10 +237,13 @@ for a per-request table.
   sees the paraphrase.
 - If two requested lines match the same catalog item, the second check
   replaces the first approval.
-- Partial sales have no minimum: request 15 sold 135 of 10,000 sheets. A
-  threshold (e.g. at least half the request) may suit customers better.
-- The customer reply does not always state a partial shortfall (request 15
-  listed the 135 sheets without saying 10,000 were requested).
+- The orchestrator can skip an approved line: in request 18 it declined the
+  whole order because two lines were below the 50% minimum, leaving an
+  approved 188 of 200 sheets of colored paper unsold. A Python check after
+  each request that re-prompts the orchestrator about unsold approvals
+  would close this gap.
+- Reply wording can contradict what happened: request 16's reply asked the
+  customer whether to proceed although the sale was already recorded.
 - If the sales agent tries a different item than the one approved, the
   guard blocks it; the agent usually retries with the approved item, but in
   one earlier run it did not and an available item went unsold.

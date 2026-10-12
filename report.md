@@ -10,7 +10,7 @@ This project builds a multi-agent system that handles free-text customer orders 
 4. records the sales, and
 5. replies to the customer.
 
-The system uses four agents, under the limit of five, built with `smolagents` on `gpt-4o-mini`. A full run over the 20 sample requests produced at least one sale in all 20 requests, 12 of them involving lines filled only in part. None of the 44 sales was mispriced or sold below cost. Total assets rose from $50,000.00 to $51,064.55.
+The system uses four agents, under the limit of five, built with `smolagents` on `gpt-4o-mini`. A full run over the 20 sample requests produced at least one sale in 18 requests, including 5 lines filled only in part. None of the 38 sales was mispriced or sold below cost. Total assets rose from $50,000.00 to $51,042.46.
 
 The main design lesson was this: **let the LLM decide what to do, and let Python do every calculation, match and database write.** Most bugs found during testing came from the LLM choosing dates, quantities, prices or catalog items. Each was fixed by moving that decision into deterministic code.
 
@@ -23,7 +23,7 @@ For the full tool reference and the reasoning behind each design decision, see [
 | Agent | Tools | Role |
 |---|---|---|
 | **Orchestrator** | delegates to the three agents below | Extracts the requested items, delegates in order, sells everything available, and writes the customer reply. |
-| **Inventory agent** | `check_availability` | Passes each line of the customer's wording to the tool, which matches it to one catalog item and checks stock, supplier lead time and cash. If only part of the quantity can be ready by the deadline, it reports how much. Read-only. |
+| **Inventory agent** | `check_availability` | Passes each line of the customer's wording to the tool, which matches it to one catalog item and checks stock, supplier lead time and cash. If only part of the quantity can be ready by the deadline, and at least half, it reports how much. Read-only. |
 | **Quoting agent** | `price_line_item`, `search_past_quotes` | Prices approved items: the supplier cost plus a 25% markup, less 5%, 10% or 15% bulk discounts. |
 | **Sales agent** | `record_sale`, `check_cash_balance` | Records each approved line. Places a supplier reorder first if needed. |
 
@@ -43,22 +43,22 @@ Results are in [`test_results.csv`](test_results.csv), from a full run of `quote
 | Metric | Result |
 |---|---|
 | Requests processed without error | 20 / 20 |
-| Requests with at least one sale | 20 / 20 |
+| Requests with at least one sale | 18 / 20 |
 | Requested lines checked | 60 |
-| Lines filled in full | 32 |
-| Lines filled in part (what could be ready by the deadline) | 12 |
+| Lines filled in full | 33 |
+| Lines filled in part (at least 50% ready by the deadline) | 5, plus 1 approved but not sold (request 18) |
+| Lines declined because less than 50% could be ready by the deadline | 5 |
 | Lines declined because nothing could be ready by the deadline | 5 |
 | Lines declined because the item is not carried | 11 (mostly A3/A5 paper; also balloons, cardboard, tickets) |
-| Sales priced exactly at cost × 1.25 less the bulk discount | 44 / 44 |
+| Sales priced exactly at cost × 1.25 less the bulk discount | 38 / 38 |
 | Sales below cost | 0 |
-| Approved quantities sold exactly as approved | 44 / 44 |
+| Duplicate sales blocked by the approval guard | 4 (request 16) |
 | Stock bought without a matching sale | 0 |
 | Items with negative stock | 0 |
 | Replies revealing stock levels, costs, markup or cash | 0 |
-| Replies asking the customer to confirm instead of selling | 0 |
 | Database integrity check | passed |
-| Revenue / restock spending | $15,455.80 / $13,784.80 |
-| Cash / inventory / total assets | $46,730.70 / $4,333.85 / $51,064.55 (started at $50,000.00) |
+| Revenue / restock spending | $15,358.91 / $13,734.80 |
+| Cash / inventory / total assets | $46,683.81 / $4,358.65 / $51,042.46 (started at $50,000.00) |
 
 ### Per-request outcomes
 
@@ -79,18 +79,18 @@ Results are in [`test_results.csv`](test_results.csv), from a full run of `quote
 | 11 | 04-08 | Matte paper 300 | $64.12 | A3 glossy paper (not carried) |
 | 12 | 04-08 | Cardstock 200, Standard copy paper 500, Paper napkins 100 | $60.50 | — |
 | 13 | 04-08 | Cardstock 148 of 200 | $26.36 | A4 paper (deadline Apr 10) |
-| 14 | 04-09 | A4 paper 865 of 5,000, Poster paper 1,000 of 2,000, Cardstock 500 | $398.66 | — |
-| 15 | 04-12 | A4 paper 135 of 10,000 | $8.02 | A3 colored paper, cardboard (not carried) |
+| 14 | 04-09 | Poster paper 1,000 of 2,000, Cardstock 500 | $350.00 | A4 paper (under 50% by deadline) |
+| 15 | 04-12 | — | — | A4 paper (under 50% by deadline); A3 colored paper, cardboard (not carried) |
 | 16 | 04-13 | Construction paper 100 of 200, Large poster paper 100 | $127.06 | A4 paper (deadline) |
-| 17 | 04-14 | Paper plates 500, Paper napkins 100 of 2,000 | $58.63 | A4 paper, paper cups (deadline); A3 colored paper (not carried) |
-| 18 | 04-14 | Cardstock 148 of 500, Standard copy paper 100 of 1,000, Colored paper 188 of 200 | $53.43 | — |
-| 19 | 04-15 | Glossy paper 1,000 of 2,000, Cardstock 852 of 1,000 | $356.28 | A3 matte paper (not carried) |
+| 17 | 04-14 | Paper plates 500 | $56.25 | paper napkins (under 50%), A4 paper, paper cups (deadline); A3 colored paper (not carried) |
+| 18 | 04-14 | — (Colored paper 188 of 200 was approved but not sold) | — | cardstock, copy paper (under 50% by deadline) |
+| 19 | 04-15 | Glossy paper 1,000 of 2,000, Cardstock 1,000 | $371.88 | A3 matte paper (not carried) |
 | 20 | 04-17 | Flyers 5,000, Poster paper 2,000 | $1,328.13 | tickets (not carried) |
 
 ### Strengths
 
 - **Prices and the books are correct by construction.** Prices come from one function shared by quoting and sales. Dates come from Python. Stock is bought only inside `record_sale`, for items actually sold. Every sale matched the expected price, and no stock order lacks a matching sale.
-- **Deadlines are respected, and as much as possible is still sold.** When the full quantity can't be ready in time, the system sells what can: current stock plus the largest supplier order that arrives by the deadline. For example, request 14 got 865 of 5,000 sheets of A4 and 1,000 of 2,000 sheets of poster paper by April 13. Only 5 lines had nothing ready in time, down from 16 before partial fulfillment, and every request now ends in a sale.
+- **Deadlines are respected, and as much as possible is still sold.** When the full quantity can't be ready in time, the system sells what can: current stock plus the largest supplier order that arrives by the deadline. For example, request 14 got 1,000 of 2,000 sheets of poster paper by April 13. A partial line is only sold if at least half the request can be ready, so a customer isn't sent, say, 135 of 10,000 sheets.
 - **Catalog matching is consistent.** Everyday wording maps to the right item, for example "colorful cardstock" to Cardstock, "colorful construction paper" to Construction paper, and "poster boards (24" x 36")" to Large poster paper. Paper sizes the catalog doesn't stock, such as A3 and A5, are declined, not swapped for A4.
 - **Large orders work.** Request 3's 500 reams were converted to 250,000 sheets, restocked in time, and sold at a profit: $10,625.00 in revenue against a $10,004.00 restock cost.
 - **Replies are customer-safe.** They list items, prices, discounts and delivery dates, and never mention stock levels, costs, the markup or cash.
@@ -98,8 +98,8 @@ Results are in [`test_results.csv`](test_results.csv), from a full run of `quote
 ### Weaknesses
 
 - **Many lines are only partly filled (12 of 60).** Supplier lead time is fixed by `get_supplier_delivery_date`, and only about 40% of catalog items start in stock, so later requests with April 15 deadlines can only be partly met.
-- **Very small partial sales.** There is no minimum, so request 15 sold 135 of 10,000 sheets. A customer planning an event may not want such a small fraction; a threshold (for example, at least half the request) or asking first may be better.
-- **Replies don't always state the shortfall.** Request 15's reply lists "135 sheets of A4 white paper" without saying that 10,000 were requested. Requests 14 and 18 did state it.
+- **The orchestrator can skip an approved line.** In request 18, two lines were below the 50% minimum and the orchestrator declined the whole order, leaving an approved 188 of 200 sheets of colored paper unsold, despite being told to always sell available items.
+- **Reply wording is not always consistent with what happened.** Request 16's reply ends "let me know if you would like to proceed", although the sale was already recorded. The sales agent in that request also tried to record both lines a second time; the approval guard blocked the duplicates.
 - **Matching is a heuristic.** It uses word overlap, a main-noun bonus and a few aliases, tuned on the sample wording. Brand names or unusual wording would need new aliases, and attributes like "recycled" or "white" are ignored.
 - **Some behavior still relies on the LLM following instructions,** such as copying the customer's wording verbatim and always selling available items. The tool guards prevent wrong sales, but they can't force a sale the agent skips.
 
@@ -118,6 +118,8 @@ The system went through about a dozen test runs. Each fix below came from a spec
 | Discounted bulk sales lost money | 25% markup over supplier cost |
 | Agents picked different catalog items for the same line | Matching done once in Python; quotes and sales resolve to the approved item |
 | "250,000 sheets of cardboard" matched "250 gsm cardstock" via the quantity's digits | Leading quantities stripped before matching (spec numbers like "250 gsm" kept) |
+| Lines that couldn't be fully ready by the deadline were declined outright | Partial fulfillment: sell what can be ready in time |
+| Partial sales as small as 135 of 10,000 sheets | Partial lines need at least 50% of the requested quantity |
 
 ## 5. Suggested improvements
 

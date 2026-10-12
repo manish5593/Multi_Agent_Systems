@@ -839,6 +839,8 @@ def _plan_fulfillment(item_name: str, quantity: int) -> Dict:
 # Largest order size in each supplier lead-time tier of get_supplier_delivery_date
 # (<=10 units same day, <=100 one day, <=1000 four days), largest first.
 SUPPLIER_ORDER_SIZE_TIERS = [1000, 100, 10]
+# A partial line is only sold if at least this share of the requested quantity can be ready in time
+MIN_PARTIAL_FRACTION = 0.5
 
 
 def _plan_partial(item_name: str, quantity: int) -> Dict:
@@ -874,8 +876,8 @@ def check_availability(description: str, quantity: int) -> str:
     """
     Match one requested item to the catalog and check whether the quantity can be ready by the
     customer's deadline, counting current stock and a possible supplier reorder. If only part of
-    it can be ready, reports how much ("available": "partial"). This only checks; it does not buy
-    anything.
+    it can be ready, and at least half, reports how much ("available": "partial"). This only
+    checks; it does not buy anything.
 
     Args:
         description: The customer's wording for one requested item, copied verbatim, e.g. "colorful cardstock".
@@ -900,7 +902,10 @@ def check_availability(description: str, quantity: int) -> str:
         return json.dumps(result)
 
     partial = _plan_partial(item_name, quantity)
-    if partial["quantity"] > 0:
+    if 0 < partial["quantity"] < MIN_PARTIAL_FRACTION * quantity:
+        result["reason"] = (f"Only {partial['quantity']} of {quantity} could be ready by the deadline, below the "
+                            f"{MIN_PARTIAL_FRACTION:.0%} minimum for a partial order. {plan['reason']}")
+    elif partial["quantity"] > 0:
         result.update({
             "available": "partial",
             "available_quantity": partial["quantity"],
