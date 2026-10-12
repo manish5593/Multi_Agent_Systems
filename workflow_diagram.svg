@@ -1,0 +1,129 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="830" viewBox="0 0 1100 830" font-family="Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#374151"/>
+    </marker>
+    <marker id="arrow-db" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#6b7280"/>
+    </marker>
+    <style>
+      .title { font-size: 22px; font-weight: 700; fill: #111827; }
+      .subtitle { font-size: 13px; fill: #4b5563; }
+      .box-title { font-size: 15px; font-weight: 700; fill: #111827; }
+      .box-text { font-size: 12px; fill: #374151; }
+      .tool { font-size: 12px; fill: #1f2937; font-family: Menlo, Consolas, monospace; }
+      .label { font-size: 12px; fill: #111827; font-weight: 600; }
+      .small { font-size: 11px; fill: #4b5563; }
+      .flow { stroke: #374151; stroke-width: 1.8; fill: none; marker-end: url(#arrow); }
+      .db { stroke: #6b7280; stroke-width: 1.3; fill: none; stroke-dasharray: 5 4; marker-end: url(#arrow-db); }
+      .ctx { stroke: #b45309; stroke-width: 1.3; fill: none; stroke-dasharray: 2 3; marker-end: url(#arrow-db); }
+    </style>
+  </defs>
+
+  <rect width="1100" height="830" fill="#ffffff"/>
+
+  <text x="40" y="42" class="title">Munder Difflin Multi-Agent System: Workflow</text>
+  <text x="40" y="64" class="subtitle">4 agents (smolagents ToolCallingAgent, gpt-4o-mini, one tool call at a time). Solid arrows: delegation. Dashed: database access.</text>
+
+  <!-- Customer request -->
+  <rect x="40" y="95" width="300" height="78" rx="8" fill="#f3f4f6" stroke="#9ca3af"/>
+  <text x="56" y="120" class="box-title">Customer request</text>
+  <text x="56" y="140" class="box-text">Free-text order from quote_requests_sample.csv</text>
+  <text x="56" y="158" class="box-text">+ request date</text>
+
+  <!-- Entry point -->
+  <rect x="400" y="95" width="300" height="114" rx="8" fill="#f3f4f6" stroke="#9ca3af"/>
+  <text x="416" y="120" class="box-title">call_multi_agent_system()</text>
+  <text x="416" y="140" class="box-text">Python, before any agent runs:</text>
+  <text x="416" y="158" class="box-text">• rewrites reams as sheets (1 ream = 500)</text>
+  <text x="416" y="176" class="box-text">• sets the request date, parses the deadline</text>
+  <text x="416" y="194" class="box-text">• clears approvals from the last request</text>
+  <path d="M340,134 L396,134" class="flow"/>
+
+  <!-- Request context -->
+  <rect x="760" y="95" width="300" height="114" rx="8" fill="#fffbeb" stroke="#d97706"/>
+  <text x="776" y="120" class="box-title">Request context (Python)</text>
+  <text x="776" y="140" class="box-text">date: transaction date for this request</text>
+  <text x="776" y="158" class="box-text">deadline: e.g. "April 15, 2025" → 2025-04-15</text>
+  <text x="776" y="176" class="box-text">approved: {item: quantity} from availability checks</text>
+  <text x="776" y="198" class="small" fill="#b45309">Used by check_availability and record_sale</text>
+  <path d="M700,134 L756,134" class="ctx"/>
+
+  <!-- Orchestrator -->
+  <rect x="330" y="225" width="440" height="128" rx="10" fill="#eef2ff" stroke="#4f46e5" stroke-width="1.5"/>
+  <text x="346" y="252" class="box-title">Orchestrator agent</text>
+  <text x="346" y="274" class="box-text">1. Extracts each requested item and its quantity</text>
+  <text x="346" y="292" class="box-text">2. Delegates to the three worker agents in order</text>
+  <text x="346" y="310" class="box-text">3. Sells every available item; writes the reply: items sold, prices, total,</text>
+  <text x="346" y="328" class="box-text">    discounts, delivery date, and items it cannot supply</text>
+  <text x="346" y="344" class="small">No substitutes, no splitting quantities, no internal numbers in replies</text>
+  <path d="M550,209 L550,221" class="flow"/>
+
+  <!-- Worker agents -->
+  <rect x="40" y="430" width="320" height="200" rx="10" fill="#ecfdf5" stroke="#059669" stroke-width="1.5"/>
+  <text x="56" y="457" class="box-title">Inventory agent</text>
+  <text x="56" y="477" class="box-text">Maps customer wording to one catalog item</text>
+  <text x="56" y="494" class="box-text">and checks it can be ready by the deadline</text>
+  <text x="56" y="522" class="tool">find_catalog_items</text>
+  <text x="56" y="538" class="small">fuzzy match + aliases; rejects unstocked sizes (A3)</text>
+  <text x="56" y="562" class="tool">check_availability</text>
+  <text x="56" y="578" class="small">read-only: stock, supplier lead time, cash;</text>
+  <text x="56" y="594" class="small">records an approval for item + quantity</text>
+
+  <rect x="390" y="430" width="320" height="200" rx="10" fill="#eff6ff" stroke="#2563eb" stroke-width="1.5"/>
+  <text x="406" y="457" class="box-title">Quoting agent</text>
+  <text x="406" y="477" class="box-text">Prices each available item</text>
+  <text x="406" y="494" class="box-text">with bulk discounts</text>
+  <text x="406" y="522" class="tool">price_line_item</text>
+  <text x="406" y="538" class="small">5% at 100+, 10% at 500+, 15% at 1000+ units</text>
+  <text x="406" y="562" class="tool">search_past_quotes</text>
+  <text x="406" y="578" class="small">similar historical quotes for context</text>
+  <text x="406" y="602" class="tool">find_catalog_items</text>
+
+  <rect x="740" y="430" width="320" height="200" rx="10" fill="#fdf2f8" stroke="#db2777" stroke-width="1.5"/>
+  <text x="756" y="457" class="box-title">Sales agent</text>
+  <text x="756" y="477" class="box-text">Records each quoted line as a sale</text>
+  <text x="756" y="522" class="tool">record_sale</text>
+  <text x="756" y="538" class="small">only approved item + quantity, once;</text>
+  <text x="756" y="554" class="small">reorders stock if needed, then records</text>
+  <text x="756" y="570" class="small">the sale at the quoted price (locked)</text>
+  <text x="756" y="594" class="tool">check_cash_balance</text>
+  <text x="756" y="614" class="tool">find_catalog_items</text>
+
+  <!-- Delegation arrows -->
+  <path d="M400,353 L230,426" class="flow"/>
+  <text x="228" y="386" class="label">① item list</text>
+  <path d="M550,353 L550,426" class="flow"/>
+  <text x="558" y="396" class="label">② available items</text>
+  <path d="M700,353 L880,426" class="flow"/>
+  <text x="800" y="386" class="label">③ quoted lines</text>
+
+  <!-- Database -->
+  <rect x="40" y="700" width="1020" height="100" rx="10" fill="#f9fafb" stroke="#6b7280"/>
+  <text x="56" y="727" class="box-title">SQLite database (munder_difflin.db)</text>
+  <text x="56" y="750" class="tool">transactions</text>
+  <text x="170" y="750" class="small">stock_orders and sales; source of stock levels and cash</text>
+  <text x="56" y="770" class="tool">inventory</text>
+  <text x="170" y="770" class="small">items stocked, unit prices, minimum stock levels</text>
+  <text x="590" y="750" class="tool">quotes</text>
+  <text x="680" y="750" class="small">historical quotes and explanations</text>
+  <text x="590" y="770" class="tool">quote_requests</text>
+  <text x="720" y="770" class="small">historical customer requests</text>
+  <text x="56" y="790" class="small">Only record_sale writes: a stock_orders row (if a reorder is needed) followed by a sales row.</text>
+
+  <path d="M200,630 L200,696" class="db"/>
+  <text x="208" y="668" class="small">read</text>
+  <path d="M550,630 L550,696" class="db"/>
+  <text x="558" y="668" class="small">read</text>
+  <path d="M900,630 L900,696" class="db"/>
+  <text x="908" y="668" class="small">read + write</text>
+
+  <!-- Output -->
+  <rect x="40" y="245" width="240" height="88" rx="8" fill="#f3f4f6" stroke="#9ca3af"/>
+  <text x="56" y="270" class="box-title">Customer reply</text>
+  <text x="56" y="290" class="box-text">Logged with cash balance and</text>
+  <text x="56" y="308" class="box-text">inventory value in</text>
+  <text x="56" y="326" class="box-text">test_results.csv</text>
+  <path d="M330,289 L284,289" class="flow"/>
+  <text x="286" y="279" class="label">④</text>
+</svg>

@@ -592,6 +592,7 @@ def search_quote_history(search_terms: List[str], limit: int = 5) -> List[Dict]:
 import difflib
 import json
 import re
+import threading
 from smolagents import OpenAIServerModel, ToolCallingAgent, tool
 
 # Set up and load your env parameters and instantiate your model.
@@ -612,7 +613,10 @@ CATALOG_ALIASES = {
     "copy paper": "Standard copy paper",
     "poster board": "Large poster paper (24x36 inches)",
 }
+CATALOG_SIZES = {word for name in CATALOG for word in name.lower().split() if re.fullmatch(r"a\d", word)}
 DEFAULT_MIN_STOCK_LEVEL = 100
+# Serializes check-then-write in record_sale so concurrent calls cannot oversell or corrupt SQLite
+_db_write_lock = threading.Lock()
 # (minimum quantity, discount rate), checked from largest tier down
 BULK_DISCOUNT_TIERS = [(1000, 0.15), (500, 0.10), (100, 0.05), (0, 0.0)]
 
@@ -631,6 +635,18 @@ def _request_date() -> str:
     if _request_context["date"] is None:
         raise RuntimeError("No request date set; call call_multi_agent_system().")
     return _request_context["date"]
+
+
+SHEETS_PER_REAM = 500
+REAM_PATTERN = re.compile(r"\b(\d[\d,]*)\s+reams?\b", re.IGNORECASE)
+
+
+def _convert_reams_to_sheets(request: str) -> str:
+    """Rewrite "500 reams" as "250,000 sheets" so every agent works in sheets."""
+    def to_sheets(match: re.Match) -> str:
+        reams = int(match.group(1).replace(",", ""))
+        return f"{reams * SHEETS_PER_REAM:,} sheets"
+    return REAM_PATTERN.sub(to_sheets, request)
 
 
 def _parse_deadline(request: str, request_date: str) -> str:
@@ -723,6 +739,10 @@ def find_catalog_items(description: str) -> str:
     """
     query = description.lower()
     query_words = set(query.replace("-", " ").split())
+    # A-series sizes we do not stock (only A4 is in the catalog) must not fuzzy-match to A4 paper
+    unstocked_sizes = {word for word in query_words if re.fullmatch(r"a\d", word)} - CATALOG_SIZES
+    if unstocked_sizes:
+        return f"No catalog item matches '{description}'. We do not carry {', '.join(sorted(unstocked_sizes)).upper()} paper."
     scored = []
     for name, item in CATALOG.items():
         name_lower = name.lower()
@@ -846,6 +866,11 @@ def record_sale(item_name: str, quantity: int) -> str:
     item_name = _resolve_item_name(item_name) or item_name
     if item_name not in CATALOG:
         return f"ERROR: '{item_name}' is not an exact catalog item name."
+    with _db_write_lock:
+        return _record_sale_locked(item_name, quantity)
+
+
+def _record_sale_locked(item_name: str, quantity: int) -> str:
     sale_date = _request_date()
     if _request_context["approved"].get(item_name) != quantity:
         return (f"ERROR: {quantity} x {item_name} was not confirmed by check_availability for this request. "
@@ -896,6 +921,7 @@ inventory_agent = ToolCallingAgent(
         "Unmatched items go on the same list with the customer's wording and 'not sold'."
     ),
     max_steps=15,
+    max_tool_threads=1,  # tools write to SQLite; run them one at a time
 )
 
 quoting_agent = ToolCallingAgent(
@@ -914,6 +940,7 @@ quoting_agent = ToolCallingAgent(
         "plus the overall total."
     ),
     max_steps=12,
+    max_tool_threads=1,  # tools write to SQLite; run them one at a time
 )
 
 sales_agent = ToolCallingAgent(
@@ -930,6 +957,7 @@ sales_agent = ToolCallingAgent(
         "Finish with which sales succeeded and which failed."
     ),
     max_steps=12,
+    max_tool_threads=1,  # tools write to SQLite; run them one at a time
 )
 
 orchestrator = ToolCallingAgent(
@@ -939,14 +967,14 @@ orchestrator = ToolCallingAgent(
     name="orchestrator",
     instructions=(
         "You are the customer service front desk of Munder Difflin Paper Company. For each request:\n"
-        "1. Extract every requested item with its quantity. Convert reams to sheets (1 ream = 500 sheets) "
-        "here, once; every later step uses these converted quantities.\n"
+        "1. Extract every requested item with its quantity, exactly as written in the request.\n"
         "2. Send the full item list to inventory_agent, once. Each requested line maps to at most one "
         "catalog item: never ask for similar or substitute items, and never split a quantity across "
         "products. If a line has no match or is unavailable, it is simply not supplied.\n"
         "3. Send only the available items to quoting_agent, using the exact catalog item_name values "
         "reported by inventory_agent (not the customer's wording) and the quantities.\n"
-        "4. Send the quoted lines (exact item names and quantities) to sales_agent.\n"
+        "4. Send the quoted lines (exact item names and quantities) to sales_agent. Always sell every "
+        "available item, even if other items are unavailable; never ask the customer to confirm first.\n"
         "5. Write the final answer to the customer: the items sold with quantities, the line totals and "
         "discounts from quoting_agent and their sum as the total, the delivery date, and which items you "
         "cannot supply. Only list items whose sale sales_agent recorded. "
@@ -955,11 +983,13 @@ orchestrator = ToolCallingAgent(
         "deadline or not something we carry."
     ),
     max_steps=10,
+    max_tool_threads=1,  # tools write to SQLite; run them one at a time
 )
 
 
 def call_multi_agent_system(request: str, request_date: str) -> str:
     _request_context["date"] = request_date
+    request = _convert_reams_to_sheets(request)
     _request_context["deadline"] = _parse_deadline(request, request_date)
     _request_context["approved"] = {}
     try:
