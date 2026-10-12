@@ -35,6 +35,8 @@ Python handles several things before and around the agents:
 - **Concurrency:** all tools run one at a time, and sale writes are locked.
 - **After the agents finish:** if any approved line was not sold, the orchestrator is sent back once to sell it and rewrite the reply. Python then checks the reply against the recorded sales: the correct total, the requested quantity for partial lines, no request to confirm after a sale, and no internal details. If it fails, the orchestrator is asked to rewrite it, up to twice, with the full list of what the reply must contain.
 
+The deterministic logic lives in four small modules next to `project_starter.py`, which imports them: `matching.py` (catalog matching), `pricing.py` (markup and bulk discounts), `fulfillment.py` (full and partial fulfillment planning) and `reply_validation.py` (the reply check). They are pure functions with no database access, so they can be tested on their own. `project_starter.py` keeps the starter code, the database wrappers, the tools, the agents and the test loop.
+
 ## 3. Evaluation of test results
 
 Results are in [`test_results.csv`](test_results.csv), from a full run of `quote_requests_sample.csv`.
@@ -142,4 +144,4 @@ echo "UDACITY_OPENAI_API_KEY=<your key>" > .env
 python project_starter.py
 ```
 
-The run takes about 15–25 minutes. It writes `test_results.csv` and prints the final financial report.
+Run it from the project folder: `project_starter.py` imports `matching.py`, `pricing.py`, `fulfillment.py` and `reply_validation.py` from the same folder. The run takes about 15–25 minutes. It writes `test_results.csv` and prints the final financial report.

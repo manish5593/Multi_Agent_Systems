@@ -589,11 +589,16 @@ def search_quote_history(search_terms: List[str], limit: int = 5) -> List[Dict]:
 ########################
 
 
-import difflib
 import json
 import re
 import threading
 from smolagents import OpenAIServerModel, ToolCallingAgent, tool
+
+# Deterministic business logic, kept in small modules next to this file
+from fulfillment import StockPosition, meets_partial_minimum, plan_fulfillment, plan_partial, MIN_PARTIAL_FRACTION
+from matching import CatalogMatcher, normalize_description
+from pricing import price_line
+from reply_validation import MAX_REPLY_REWRITES, reply_problems, reply_requirements
 
 # Set up and load your env parameters and instantiate your model.
 dotenv.load_dotenv()
@@ -606,22 +611,10 @@ model = OpenAIServerModel(
 
 # Business rules shared by the tools
 CATALOG = {item["item_name"]: item for item in paper_supplies}
-CATALOG_BY_LOWER_NAME = {name.lower(): name for name in CATALOG}
-# Common customer wording that does not resemble the catalog name
-CATALOG_ALIASES = {
-    "printer paper": "Standard copy paper",
-    "copy paper": "Standard copy paper",
-    "poster board": "Large poster paper (24x36 inches)",
-}
-CATALOG_SIZES = {word for name in CATALOG for word in name.lower().split() if re.fullmatch(r"a\d", word)}
+catalog_matcher = CatalogMatcher(CATALOG)
 DEFAULT_MIN_STOCK_LEVEL = 100
 # Serializes check-then-write in record_sale so concurrent calls cannot oversell or corrupt SQLite
 _db_write_lock = threading.Lock()
-# (minimum quantity, discount rate), checked from largest tier down
-BULK_DISCOUNT_TIERS = [(1000, 0.15), (500, 0.10), (100, 0.05), (0, 0.0)]
-# Catalog unit_price is what the supplier charges us; customers pay it plus this markup.
-# 25% keeps the largest bulk discount profitable: 1.25 * 0.85 = 1.0625 of cost.
-MARKUP_RATE = 0.25
 
 
 # The date and delivery deadline of the request being processed. Set by call_multi_agent_system
@@ -701,103 +694,23 @@ def _ensure_in_inventory_table(item_name: str) -> None:
         }]).to_sql("inventory", db_engine, if_exists="append", index=False)
 
 
-def _resolve_item_name(item_name: str) -> Union[str, None]:
-    """Return the exact catalog name, ignoring case and surrounding whitespace."""
-    return CATALOG_BY_LOWER_NAME.get(str(item_name).strip().lower())
+def _stock_position(item_name: str) -> StockPosition:
+    order_date = _request_date()
+    return StockPosition(
+        stock=_current_stock(item_name, order_date),
+        min_stock_level=_min_stock_level(item_name),
+        unit_cost=CATALOG[item_name]["unit_price"],
+        cash=get_cash_balance(order_date),
+    )
 
 
-def _bulk_discount_rate(quantity: int) -> float:
-    for min_quantity, rate in BULK_DISCOUNT_TIERS:
-        if quantity >= min_quantity:
-            return rate
-    return 0.0
-
-
-def _list_price(item_name: str) -> float:
-    """Customer price per unit before any discount."""
-    return round(CATALOG[item_name]["unit_price"] * (1 + MARKUP_RATE), 4)
+def _plan_fulfillment(item_name: str, quantity: int, position: Union[StockPosition, None] = None) -> Dict:
+    return plan_fulfillment(quantity, position or _stock_position(item_name), _request_date(),
+                            _request_context["deadline"], get_supplier_delivery_date)
 
 
 def _price_line(item_name: str, quantity: int) -> Dict:
-    """Price one line with the bulk discount. Used by both quoting and sales so they always agree."""
-    unit_price = _list_price(item_name)
-    discount_rate = _bulk_discount_rate(quantity)
-    discounted_unit_price = unit_price * (1 - discount_rate)
-    return {
-        "item_name": item_name,
-        "quantity": quantity,
-        "unit_price": unit_price,
-        "discount_rate": discount_rate,
-        "discounted_unit_price": round(discounted_unit_price, 4),
-        "line_total": round(discounted_unit_price * quantity, 2),
-    }
-
-
-"""Set up tools for your agents to use, these should be methods that combine the database functions above
- and apply criteria to them to ensure that the flow of the system is correct."""
-
-
-def _match_words(text: str) -> List[str]:
-    """Lowercase words with punctuation removed and simple plurals singularized."""
-    words = re.findall(r"[a-z0-9]+", text.lower())
-    return [w[:-1] if len(w) > 3 and w.endswith("s") and not w.endswith("ss") else w for w in words]
-
-
-# A leading order quantity, e.g. "250,000 sheets of" or "2000", but not a spec like "250 gsm" or "100 lb"
-LEADING_QUANTITY_PATTERN = re.compile(
-    r"^\s*\d[\d,]*(?![\d,])(?!\s*(?:gsm|lb)\b)\s*"
-    r"(?:(?:sheets?|rolls?|reams?|packets?|packs?|boxes?|units?|pieces?|pads?|pcs)\b)?\s*(?:of\b)?\s*",
-    re.IGNORECASE,
-)
-
-
-def _strip_quantity(description: str) -> str:
-    """Remove a leading order quantity so its digits cannot match items like "250 gsm cardstock"."""
-    return LEADING_QUANTITY_PATTERN.sub("", description, count=1)
-
-
-def _normalize_description(description: str) -> str:
-    return " ".join(_match_words(description))
-
-
-def _best_catalog_match(description: str) -> Union[str, None]:
-    """
-    Pick the single catalog item that best matches a customer's description, or None.
-
-    Score = share of the item's name words found in the description, plus a bonus when the
-    item contains the description's main noun (its last word), plus a little string similarity
-    to break ties. Items must share at least one word with the description.
-    """
-    exact = _resolve_item_name(description)
-    if exact:
-        return exact
-    description = _strip_quantity(description)
-    query_words = set(_match_words(description))
-    # Main noun: last word, ignoring parenthetical details like "(white)"
-    head_words = _match_words(re.sub(r"\([^)]*\)", " ", description))
-    head = head_words[-1] if head_words else None
-
-    sizes = {w for w in query_words if re.fullmatch(r"a\d", w)}
-    if sizes - CATALOG_SIZES:
-        return None  # e.g. A3 or A5: we only stock A4, so do not fuzzy-match to A4 paper
-    if not sizes:
-        for alias, name in CATALOG_ALIASES.items():
-            if alias in _normalize_description(description):
-                return name
-
-    best_score, best_name = 0.0, None
-    for name in CATALOG:
-        name_words = set(_match_words(name))
-        overlap = len(query_words & name_words)
-        if overlap == 0:
-            continue
-        score = overlap / len(name_words)
-        if head in name_words:
-            score += 0.5
-        score += 0.25 * difflib.SequenceMatcher(None, description.lower(), name.lower()).ratio()
-        if score > best_score:
-            best_score, best_name = score, name
-    return best_name
+    return price_line(item_name, CATALOG[item_name]["unit_price"], quantity)
 
 
 def _resolve_requested_item(name_or_description: str) -> Union[str, None]:
@@ -805,9 +718,9 @@ def _resolve_requested_item(name_or_description: str) -> Union[str, None]:
     Map an exact catalog name, a description already checked this request, or a near-miss name
     (e.g. "Washi tape", "A4 matte paper") to its catalog item. Callers still require approval.
     """
-    return (_resolve_item_name(name_or_description)
-            or _request_context["matched"].get(_normalize_description(name_or_description))
-            or _best_catalog_match(name_or_description))
+    return (catalog_matcher.exact(name_or_description)
+            or _request_context["matched"].get(normalize_description(name_or_description))
+            or catalog_matcher.best_match(name_or_description))
 
 
 def _not_approved_error(item: str, quantity: int, action: str) -> str:
@@ -816,63 +729,8 @@ def _not_approved_error(item: str, quantity: int, action: str) -> str:
             f"cannot be {action}. Confirmed items: {approved}. Use those exact names and quantities.")
 
 
-def _plan_fulfillment(item_name: str, quantity: int) -> Dict:
-    """
-    Work out whether `quantity` of an item can be ready by the request's deadline, and what
-    supplier order (if any) that needs. Read-only: nothing is bought here.
-    """
-    order_date = _request_date()
-    deadline = _request_context["deadline"]
-    stock = _current_stock(item_name, order_date)
-    if stock >= quantity:
-        return {"available": True, "reorder_quantity": 0, "cost": 0.0, "ready_date": order_date}
-
-    # Order enough to cover the shortfall and get back up to the minimum stock level
-    reorder_quantity = quantity - stock + _min_stock_level(item_name)
-    delivery_date = get_supplier_delivery_date(order_date, reorder_quantity)
-    if delivery_date > deadline:
-        return {
-            "available": False,
-            "reason": f"Not enough in stock, and the earliest supplier delivery is {delivery_date}, "
-                      f"after the {deadline} deadline.",
-        }
-    cost = reorder_quantity * CATALOG[item_name]["unit_price"]
-    if cost > get_cash_balance(order_date):
-        return {"available": False, "reason": "Not enough in stock and it cannot be restocked at this time."}
-    return {"available": True, "reorder_quantity": reorder_quantity, "cost": cost, "ready_date": delivery_date}
-
-
-# Largest order size in each supplier lead-time tier of get_supplier_delivery_date
-# (<=10 units same day, <=100 one day, <=1000 four days), largest first.
-SUPPLIER_ORDER_SIZE_TIERS = [1000, 100, 10]
-# A partial line is only sold if at least this share of the requested quantity can be ready in time
-MIN_PARTIAL_FRACTION = 0.5
-
-
-def _plan_partial(item_name: str, quantity: int) -> Dict:
-    """
-    When the full quantity cannot be ready by the deadline, find the most that can: current
-    stock plus the largest affordable supplier order that still arrives in time, keeping the
-    minimum stock level as a buffer. Read-only.
-    """
-    order_date = _request_date()
-    deadline = _request_context["deadline"]
-    stock = _current_stock(item_name, order_date)
-    unit_cost = CATALOG[item_name]["unit_price"]
-    affordable = int(get_cash_balance(order_date) // unit_cost)
-    best_quantity, ready_date = min(stock, quantity), order_date
-    for tier in SUPPLIER_ORDER_SIZE_TIERS:
-        reorder_quantity = min(tier, affordable)
-        if reorder_quantity <= 0:
-            continue
-        delivery_date = get_supplier_delivery_date(order_date, reorder_quantity)
-        if delivery_date > deadline:
-            continue
-        with_reorder = min(quantity, stock + reorder_quantity - _min_stock_level(item_name))
-        if with_reorder > best_quantity:
-            best_quantity, ready_date = with_reorder, delivery_date
-        break  # tiers are largest first, so the first one that arrives in time supplies the most
-    return {"quantity": best_quantity, "ready_date": ready_date}
+"""Set up tools for your agents to use, these should be methods that combine the database functions above
+ and apply criteria to them to ensure that the flow of the system is correct."""
 
 
 # Tools for inventory agent
@@ -906,17 +764,18 @@ def check_availability(description: str, quantity: int) -> str:
         A JSON object with the matched catalog item_name, whether it is available by the deadline
         (true, "partial" or false), the available_quantity, and its ready date or the reason not.
     """
-    item_name = _best_catalog_match(description)
+    item_name = catalog_matcher.best_match(description)
     if item_name is None:
         return json.dumps({"description": description, "item_name": None, "available": False,
                            "reason": "Not something we carry."})
-    _request_context["matched"][_normalize_description(description)] = item_name
+    _request_context["matched"][normalize_description(description)] = item_name
     already_sold = sum(qty for name, qty, _ in _request_context["sold"] if name == item_name)
     if already_sold:
         # Re-checking after a sale must not approve the item again, or it could be sold twice
         return json.dumps({"description": description, "item_name": item_name, "available": "already sold",
                            "reason": f"{already_sold} x {item_name} was already sold in this request."})
-    plan = _plan_fulfillment(item_name, quantity)
+    position = _stock_position(item_name)
+    plan = _plan_fulfillment(item_name, quantity, position)
     result = {"description": description, "item_name": item_name, "quantity": quantity,
               "available": plan["available"]}
     if plan["available"]:
@@ -925,8 +784,9 @@ def check_availability(description: str, quantity: int) -> str:
         _request_context["approved"][item_name] = quantity
         return json.dumps(result)
 
-    partial = _plan_partial(item_name, quantity)
-    if 0 < partial["quantity"] < MIN_PARTIAL_FRACTION * quantity:
+    partial = plan_partial(quantity, position, _request_date(), _request_context["deadline"],
+                           get_supplier_delivery_date)
+    if partial["quantity"] > 0 and not meets_partial_minimum(partial["quantity"], quantity):
         result["reason"] = (f"Only {partial['quantity']} of {quantity} could be ready by the deadline, below the "
                             f"{MIN_PARTIAL_FRACTION:.0%} minimum for a partial order. {plan['reason']}")
     elif partial["quantity"] > 0:
@@ -1131,69 +991,8 @@ orchestrator = ToolCallingAgent(
 )
 
 
-CONFIRMATION_PATTERN = re.compile(
-    r"would you like to proceed|like to proceed|please confirm|confirm (?:if|whether|that you)|"
-    r"let (?:me|us) know if you(?:'d| would) like (?:to|us to) (?:proceed|go ahead|continue)",
-    re.IGNORECASE,
-)
-ORDER_PLACED_PATTERN = re.compile(
-    r"successfully (?:placed|processed|recorded|finalized)|(?:order|sale) (?:has been|is) "
-    r"(?:placed|confirmed|recorded|processed)",
-    re.IGNORECASE,
-)
-INTERNAL_DETAIL_PATTERN = re.compile(
-    r"\bcash\b|\bfunds?\b|\bmarkup\b|\bmargin\b|supplier cost|restock(?:ing)? cost|\d[\d,]* (?:units|sheets) in stock|"
-    r"\d[\d,]* (?:units|sheets) (?:were|was) available|minimum (?:for a partial order|threshold)|"
-    r"\b(?:inventory_agent|quoting_agent|sales_agent|check_availability|price_line_item|record_sale)\b",
-    re.IGNORECASE,
-)
-
-
-MAX_REPLY_REWRITES = 2
-
-
-def _reply_requirements() -> str:
-    """Everything the reply must say about this request's sales, so a rewrite can't fix one point and drop another."""
-    sold = _request_context["sold"]
-    if not sold:
-        return "Nothing was sold, so the reply must not say an order was placed or confirmed."
-    lines = []
-    for name, qty, line_total in sold:
-        requested = _request_context["partial"].get(name)
-        if requested:
-            lines.append(f"{qty} of the {requested:,} requested {name} for ${line_total:,.2f} (the rest is "
-                         f"unavailable by the deadline)")
-        else:
-            lines.append(f"{qty} {name} for ${line_total:,.2f}")
-    total = sum(line_total for _, _, line_total in sold)
-    return (f"The reply must list these sold items: {'; '.join(lines)}; state the total of ${total:,.2f}; "
-            f"not ask the customer to confirm or proceed, because the sale is already recorded; and not "
-            f"mention cash, markup, costs, stock counts, the partial-order minimum or internal agents.")
-
-
 def _reply_problems(reply: str) -> List[str]:
-    """Check the customer reply against what was actually recorded during this request."""
-    problems = []
-    numbers = reply.replace(",", "")
-    sold = _request_context["sold"]
-    if sold:
-        total = sum(line_total for _, _, line_total in sold)
-        if f"{total:.2f}" not in numbers:
-            items = "; ".join(f"{qty} x {name} ${line_total:.2f}" for name, qty, line_total in sold)
-            problems.append(f"State the total of ${total:,.2f} for the items sold ({items}).")
-        if CONFIRMATION_PATTERN.search(reply):
-            problems.append("The sale is already recorded, so do not ask the customer to confirm or whether to proceed.")
-        for name, qty, _ in sold:
-            requested = _request_context["partial"].get(name)
-            if requested and str(requested) not in numbers:
-                problems.append(f"Say that {qty} of the {requested:,} requested {name} will be supplied, "
-                                f"and that the rest is unavailable by the deadline.")
-    elif ORDER_PLACED_PATTERN.search(reply):
-        problems.append("No sale was recorded, so do not say the order was placed or confirmed.")
-    leaked = sorted({m.group(0).lower() for m in INTERNAL_DETAIL_PATTERN.finditer(reply)})
-    if leaked:
-        problems.append(f"Remove internal details: {', '.join(leaked)}.")
-    return problems
+    return reply_problems(reply, _request_context["sold"], _request_context["partial"])
 
 
 def call_multi_agent_system(request: str, request_date: str) -> str:
@@ -1222,7 +1021,7 @@ def call_multi_agent_system(request: str, request_date: str) -> str:
             print(f"REPLY CHECK FAILED: {problems}; asking the orchestrator to rewrite the reply (attempt {attempt})")
             response = str(orchestrator.run(
                 "Your reply to the customer has these problems: " + " ".join(problems) + " "
-                + _reply_requirements() + " All sales are already recorded, so do not call any agents. "
+                + reply_requirements(_request_context["sold"], _request_context["partial"]) + " All sales are already recorded, so do not call any agents. "
                 "Rewrite the complete final reply to the customer.",
                 reset=False,
             ))

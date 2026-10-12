@@ -18,6 +18,25 @@ OpenAI-compatible proxy. The model can be changed with OPENAI_MODEL_ID in .env.
 The system uses 4 agents, within the limit of 5.
 
 
+CODE STRUCTURE
+--------------
+  project_starter.py   Entry point. Starter code and helper functions,
+                       database wrappers, per-request state, the agent
+                       tools, the four agents, the follow-up checks and
+                       the test loop.
+  matching.py          CatalogMatcher: maps customer wording to one
+                       catalog item (aliases, quantity stripping, sizes).
+  pricing.py           Markup and bulk-discount pricing of a line.
+  fulfillment.py       Full and partial fulfillment planning, and the 50%
+                       partial-order minimum.
+  reply_validation.py  Checks the customer reply against recorded sales.
+
+The four modules are pure logic: they don't touch the database or the
+request state, so they can be tested on their own. project_starter.py
+passes in what they need (stock position, supplier lead-time function,
+sales recorded). They must sit in the same folder as project_starter.py.
+
+
 2. AGENTS
 ---------
 Orchestrator agent
