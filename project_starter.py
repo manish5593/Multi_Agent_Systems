@@ -626,8 +626,9 @@ MARKUP_RATE = 0.25
 
 # The date and delivery deadline of the request being processed. Set by call_multi_agent_system
 # so that every transaction uses the real dates rather than dates chosen by the LLM.
-# "approved" maps item name -> quantity confirmed by check_availability; record_sale may only sell those.
-_request_context = {"date": None, "deadline": None, "approved": {}}
+# "approved" maps item name -> quantity confirmed by check_availability; only those can be quoted or sold.
+# "matched" maps each customer description checked this request -> the catalog item it matched.
+_request_context = {"date": None, "deadline": None, "approved": {}, "matched": {}}
 DEADLINE_PATTERN = re.compile(
     r"(January|February|March|April|May|June|July|August|September|October|November|December)"
     r"\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+(\d{4})"
@@ -730,46 +731,65 @@ def _price_line(item_name: str, quantity: int) -> Dict:
  and apply criteria to them to ensure that the flow of the system is correct."""
 
 
-# Tools for inventory agent
+def _match_words(text: str) -> List[str]:
+    """Lowercase words with punctuation removed and simple plurals singularized."""
+    words = re.findall(r"[a-z0-9]+", text.lower())
+    return [w[:-1] if len(w) > 3 and w.endswith("s") and not w.endswith("ss") else w for w in words]
 
-@tool
-def find_catalog_items(description: str) -> str:
+
+def _normalize_description(description: str) -> str:
+    return " ".join(_match_words(description))
+
+
+def _best_catalog_match(description: str) -> Union[str, None]:
     """
-    Find the catalog items that best match a customer's description of a product.
-    Always use this before any other tool so that exact catalog item names are used.
+    Pick the single catalog item that best matches a customer's description, or None.
 
-    Args:
-        description: The customer's wording for the item, e.g. "A4 glossy paper" or "heavy cardstock".
-
-    Returns:
-        A JSON list of up to 5 candidate items with their exact item_name, category and list_price,
-        or a message saying nothing in the catalog matches.
+    Score = share of the item's name words found in the description, plus a bonus when the
+    item contains the description's main noun (its last word), plus a little string similarity
+    to break ties. Items must share at least one word with the description.
     """
-    query = description.lower()
-    query_words = set(query.replace("-", " ").split())
-    # A-series sizes we do not stock (only A4 is in the catalog) must not fuzzy-match to A4 paper
-    unstocked_sizes = {word for word in query_words if re.fullmatch(r"a\d", word)} - CATALOG_SIZES
-    if unstocked_sizes:
-        return f"No catalog item matches '{description}'. We do not carry {', '.join(sorted(unstocked_sizes)).upper()} paper."
-    scored = []
-    for name, item in CATALOG.items():
-        name_lower = name.lower()
-        name_words = set(name_lower.replace("-", " ").replace("(", " ").replace(")", " ").split())
-        overlap = len(query_words & name_words) / max(len(name_words), 1)
-        similarity = difflib.SequenceMatcher(None, query, name_lower).ratio()
-        score = overlap + similarity
-        if overlap > 0 or similarity >= 0.5:
-            scored.append((score, item))
-    for alias, name in CATALOG_ALIASES.items():
-        if alias in query:
-            scored.append((float("inf"), CATALOG[name]))
-    scored.sort(key=lambda pair: pair[0], reverse=True)
-    if not scored:
-        return f"No catalog item matches '{description}'. We do not sell this item."
-    return json.dumps([
-        {"item_name": item["item_name"], "category": item["category"], "list_price": _list_price(item["item_name"])}
-        for _, item in scored[:5]
-    ])
+    exact = _resolve_item_name(description)
+    if exact:
+        return exact
+    query_words = set(_match_words(description))
+    # Main noun: last word, ignoring parenthetical details like "(white)"
+    head_words = _match_words(re.sub(r"\([^)]*\)", " ", description))
+    head = head_words[-1] if head_words else None
+
+    sizes = {w for w in query_words if re.fullmatch(r"a\d", w)}
+    if sizes - CATALOG_SIZES:
+        return None  # e.g. A3 or A5: we only stock A4, so do not fuzzy-match to A4 paper
+    if not sizes:
+        for alias, name in CATALOG_ALIASES.items():
+            if alias in _normalize_description(description):
+                return name
+
+    best_score, best_name = 0.0, None
+    for name in CATALOG:
+        name_words = set(_match_words(name))
+        overlap = len(query_words & name_words)
+        if overlap == 0:
+            continue
+        score = overlap / len(name_words)
+        if head in name_words:
+            score += 0.5
+        score += 0.25 * difflib.SequenceMatcher(None, description.lower(), name.lower()).ratio()
+        if score > best_score:
+            best_score, best_name = score, name
+    return best_name
+
+
+def _resolve_requested_item(name_or_description: str) -> Union[str, None]:
+    """Map an exact catalog name, or a description already checked this request, to its catalog item."""
+    return (_resolve_item_name(name_or_description)
+            or _request_context["matched"].get(_normalize_description(name_or_description)))
+
+
+def _not_approved_error(item: str, quantity: int, action: str) -> str:
+    approved = ", ".join(f"{qty} x {name}" for name, qty in _request_context["approved"].items()) or "none"
+    return (f"ERROR: {quantity} x {item} was not confirmed by check_availability for this request, so it "
+            f"cannot be {action}. Confirmed items: {approved}. Use those exact names and quantities.")
 
 
 def _plan_fulfillment(item_name: str, quantity: int) -> Dict:
@@ -798,24 +818,31 @@ def _plan_fulfillment(item_name: str, quantity: int) -> Dict:
     return {"available": True, "reorder_quantity": reorder_quantity, "cost": cost, "ready_date": delivery_date}
 
 
+# Tools for inventory agent
+
 @tool
-def check_availability(item_name: str, quantity: int) -> str:
+def check_availability(description: str, quantity: int) -> str:
     """
-    Check whether a quantity of a catalog item can be ready by the customer's deadline, counting
-    current stock and a possible supplier reorder. This only checks; it does not buy anything.
+    Match one requested item to the catalog and check whether the quantity can be ready by the
+    customer's deadline, counting current stock and a possible supplier reorder. This only
+    checks; it does not buy anything.
 
     Args:
-        item_name: The exact catalog item name, as returned by find_catalog_items.
+        description: The customer's wording for one requested item, copied verbatim, e.g. "colorful cardstock".
         quantity: The number of units the customer wants.
 
     Returns:
-        A JSON object saying whether the item is available by the deadline, and its ready date or the reason not.
+        A JSON object with the matched catalog item_name and whether it is available by the deadline,
+        with its ready date or the reason not.
     """
-    item_name = _resolve_item_name(item_name) or item_name
-    if item_name not in CATALOG:
-        return f"ERROR: '{item_name}' is not an exact catalog item name. Use find_catalog_items first."
+    item_name = _best_catalog_match(description)
+    if item_name is None:
+        return json.dumps({"description": description, "item_name": None, "available": False,
+                           "reason": "Not something we carry."})
+    _request_context["matched"][_normalize_description(description)] = item_name
     plan = _plan_fulfillment(item_name, quantity)
-    result = {"item_name": item_name, "quantity": quantity, "available": plan["available"]}
+    result = {"description": description, "item_name": item_name, "quantity": quantity,
+              "available": plan["available"]}
     if plan["available"]:
         result["ready_date"] = plan["ready_date"]
         _request_context["approved"][item_name] = quantity
@@ -847,16 +874,16 @@ def price_line_item(item_name: str, quantity: int) -> str:
     Discount tiers: 100+ units 5%, 500+ units 10%, 1000+ units 15%.
 
     Args:
-        item_name: The exact catalog item name, as returned by find_catalog_items.
+        item_name: The catalog item_name confirmed by check_availability (or the customer's description of it).
         quantity: The number of units being quoted.
 
     Returns:
         A JSON object with unit price, discount rate, discounted unit price and line total.
     """
-    item_name = _resolve_item_name(item_name) or item_name
-    if item_name not in CATALOG:
-        return f"ERROR: '{item_name}' is not an exact catalog item name. Use find_catalog_items first."
-    return json.dumps(_price_line(item_name, quantity))
+    resolved = _resolve_requested_item(item_name)
+    if resolved is None or _request_context["approved"].get(resolved) != quantity:
+        return _not_approved_error(resolved or item_name, quantity, "quoted")
+    return json.dumps(_price_line(resolved, quantity))
 
 
 # Tools for ordering agent
@@ -868,24 +895,23 @@ def record_sale(item_name: str, quantity: int) -> str:
     stock from the supplier if needed. Refuses if the item cannot be ready by the deadline.
 
     Args:
-        item_name: The exact catalog item name.
+        item_name: The catalog item_name confirmed by check_availability (or the customer's description of it).
         quantity: The number of units sold.
 
     Returns:
         A confirmation with the transaction ID and ready date, or an error message.
     """
-    item_name = _resolve_item_name(item_name) or item_name
-    if item_name not in CATALOG:
-        return f"ERROR: '{item_name}' is not an exact catalog item name."
+    resolved = _resolve_requested_item(item_name)
+    if resolved is None:
+        return _not_approved_error(item_name, quantity, "sold")
     with _db_write_lock:
-        return _record_sale_locked(item_name, quantity)
+        return _record_sale_locked(resolved, quantity)
 
 
 def _record_sale_locked(item_name: str, quantity: int) -> str:
     sale_date = _request_date()
     if _request_context["approved"].get(item_name) != quantity:
-        return (f"ERROR: {quantity} x {item_name} was not confirmed by check_availability for this request. "
-                f"Only sell items the customer asked for, at the confirmed quantity.")
+        return _not_approved_error(item_name, quantity, "sold")
     plan = _plan_fulfillment(item_name, quantity)
     if not plan["available"]:
         return f"ERROR: cannot sell {quantity} x {item_name}. {plan['reason']}"
@@ -913,30 +939,27 @@ def check_cash_balance() -> str:
 # Set up your agents and create an orchestration agent that will manage them.
 
 inventory_agent = ToolCallingAgent(
-    tools=[find_catalog_items, check_availability],
+    tools=[check_availability],
     model=model,
     name="inventory_agent",
     description=(
-        "Maps the customer's item descriptions to exact catalog item names and checks whether each can be "
+        "Matches each of the customer's item descriptions to a catalog item and checks whether it can be "
         "ready by the deadline, from stock or a supplier reorder. Give it the full list of requested items with quantities in sheets or "
         "units. It reports which items can be supplied by the customer's deadline."
     ),
     instructions=(
-        "For each requested item: call find_catalog_items and pick the single best exact match. "
-        "If nothing is a reasonable match (e.g. balloons, A3 paper), mark it as not sold. "
-        "For each matched item you MUST call check_availability once, with that single best match and the "
-        "full quantity exactly as given. Never conclude an item is unavailable without calling check_availability. "
-        "Never check alternatives, substitutes or partial quantities. "
-        "In your final answer, list every item as: exact catalog item_name (copied verbatim from the tool "
-        "output, never the customer's wording) | quantity | available (yes/no) | ready date or reason. "
-        "Unmatched items go on the same list with the customer's wording and 'not sold'."
+        "For each requested item, call check_availability exactly once with the customer's description "
+        "copied verbatim (e.g. 'colorful cardstock', not a catalog name you chose) and the full quantity. "
+        "The tool picks the catalog item itself. Never check alternatives, substitutes or partial quantities. "
+        "In your final answer, list every item as: customer description | catalog item_name from the tool "
+        "(or 'not carried') | quantity | available (yes/no) | ready date or reason."
     ),
     max_steps=15,
     max_tool_threads=1,  # tools write to SQLite; run them one at a time
 )
 
 quoting_agent = ToolCallingAgent(
-    tools=[find_catalog_items, search_past_quotes, price_line_item],
+    tools=[search_past_quotes, price_line_item],
     model=model,
     name="quoting_agent",
     description=(
@@ -944,8 +967,8 @@ quoting_agent = ToolCallingAgent(
         "past quotes for context. Returns line totals and a quote total."
     ),
     instructions=(
-        "Call price_line_item for every item you are given; never invent prices. "
-        "If an item name is rejected, call find_catalog_items to get the exact name and retry. "
+        "Call price_line_item for every item you are given, using the catalog item_name and quantity "
+        "exactly as given; never invent prices. If it is rejected, retry with a confirmed item it lists. "
         "Optionally call search_past_quotes once for context on similar requests. "
         "Finish with each item's quantity, discounted unit price, discount rate and line total, "
         "plus the overall total."
@@ -955,7 +978,7 @@ quoting_agent = ToolCallingAgent(
 )
 
 sales_agent = ToolCallingAgent(
-    tools=[find_catalog_items, record_sale, check_cash_balance],
+    tools=[record_sale, check_cash_balance],
     model=model,
     name="sales_agent",
     description=(
@@ -964,7 +987,7 @@ sales_agent = ToolCallingAgent(
     ),
     instructions=(
         "Call record_sale once per line item with the exact item name and quantity; it charges the quoted price. "
-        "If an item name is rejected, call find_catalog_items to get the exact name and retry. "
+        "If it is rejected, retry with a confirmed item it lists. "
         "Finish with which sales succeeded and which failed."
     ),
     max_steps=12,
@@ -979,14 +1002,14 @@ orchestrator = ToolCallingAgent(
     instructions=(
         "You are the customer service front desk of Munder Difflin Paper Company. For each request:\n"
         "1. Extract every requested item with its quantity, exactly as written in the request.\n"
-        "2. Send the full item list to inventory_agent, once. Each requested line maps to at most one "
-        "catalog item: never ask for similar or substitute items, and never split a quantity across "
-        "products. If a line has no match or is unavailable, it is simply not supplied.\n"
+        "2. Send the full item list to inventory_agent, once, in the customer's own wording. It matches "
+        "each line to at most one catalog item: never ask for similar or substitute items, and never split "
+        "a quantity across products. If a line has no match or is unavailable, it is simply not supplied.\n"
         "3. Send only the available items to quoting_agent, using the exact catalog item_name values "
         "reported by inventory_agent (not the customer's wording) and the quantities.\n"
         "4. Send the quoted lines (exact item names and quantities) to sales_agent. Always sell every "
         "available item, even if other items are unavailable; never ask the customer to confirm first.\n"
-        "5. Write the final answer to the customer: the items sold with quantities, the line totals and "
+        "5. Write the final answer to the customer: the items sold, named by their catalog item_name, with quantities, the line totals and "
         "discounts from quoting_agent and their sum as the total, the delivery date, and which items you "
         "cannot supply. Only list items whose sale sales_agent recorded. "
         "Be polite and concise. Never mention stock levels, restock costs, cash, funds, suppliers, "
@@ -1003,12 +1026,14 @@ def call_multi_agent_system(request: str, request_date: str) -> str:
     request = _convert_reams_to_sheets(request)
     _request_context["deadline"] = _parse_deadline(request, request_date)
     _request_context["approved"] = {}
+    _request_context["matched"] = {}
     try:
         return str(orchestrator.run(request, reset=True))
     finally:
         _request_context["date"] = None
         _request_context["deadline"] = None
         _request_context["approved"] = {}
+        _request_context["matched"] = {}
 
 
 # Run your test scenarios by writing them here. Make sure to keep track of them.

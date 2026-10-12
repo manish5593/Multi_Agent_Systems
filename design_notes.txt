@@ -32,45 +32,56 @@ Orchestrator agent
   information (stock levels, costs, cash, suppliers, tool errors).
 
 Inventory agent
-  Tools: find_catalog_items, check_availability
-  Maps each line of the customer's wording to the single best catalog item,
-  then checks whether the full quantity can be ready by the deadline. Items
-  with no reasonable catalog match (e.g. balloons, A3 paper) are reported as
-  not sold.
+  Tools: check_availability
+  Passes each line of the customer's wording, verbatim, to check_availability,
+  which picks the catalog item and checks whether the full quantity can be
+  ready by the deadline. Items with no catalog match (e.g. balloons, A3 paper)
+  are reported as not carried.
 
 Quoting agent
-  Tools: price_line_item, search_past_quotes, find_catalog_items
+  Tools: price_line_item, search_past_quotes
   Prices every available item using the bulk discount tiers and can look up
   similar historical quotes for context. It never invents prices.
 
 Sales agent
-  Tools: record_sale, check_cash_balance, find_catalog_items
+  Tools: record_sale, check_cash_balance
   Records a sale for each quoted line. record_sale places any supplier reorder
   that is needed and records the sale at the quoted price.
 
 
 3. TOOLS
 --------
-find_catalog_items(description)
-  Fuzzy-matches customer wording against the 46 catalog item names (word
-  overlap plus string similarity), with a few aliases for wording that does not
-  resemble the catalog name ("printer paper" / "copy paper" -> Standard copy
-  paper, "poster board" -> Large poster paper (24x36 inches)). A paper size the
-  catalog does not stock (e.g. A3, A5) returns "we do not carry" rather than
-  fuzzy-matching to A4 paper. Returns up to 5 candidates with exact names and
-  customer list prices.
-
-check_availability(item_name, quantity)                       [read-only]
+check_availability(description, quantity)                     [read-only]
+  Takes the customer's wording for one item (e.g. "colorful cardstock") and
+  matches it to a single catalog item in Python (see Catalog matching below).
   If current stock covers the quantity, the item is ready on the request date.
   Otherwise it plans a supplier reorder of (shortfall + minimum stock level),
   uses get_supplier_delivery_date for the lead time, and checks that the
   delivery arrives by the deadline and that the company can afford it. It
-  writes nothing to the database, but records an approval for this item and
-  quantity in the request context.
+  writes nothing to the database, but records an approval for the matched
+  item and quantity, and remembers which item the description matched.
+
+Catalog matching (_best_catalog_match)
+  Deterministic; no agent chooses between candidates.
+  - A-series sizes the catalog does not stock (A3, A5) match nothing.
+  - Aliases for wording unlike any catalog name ("printer paper" / "copy
+    paper" -> Standard copy paper, "poster board" -> Large poster paper
+    (24x36 inches)), unless the request names a stocked size such as A4.
+  - Otherwise each item is scored by the share of its name words found in
+    the description (plurals normalized), plus a bonus if it contains the
+    description's main noun (its last word, e.g. "cardstock" in "colorful
+    cardstock"), plus a little string similarity to break ties. Items must
+    share at least one word with the description, so "cardboard" or
+    "tickets" match nothing.
+  On every item phrase in the 20 sample requests, the matcher picks the
+  intended item (e.g. "colorful construction paper" -> Construction paper,
+  "kraft paper envelopes" -> Envelopes, "A4 white printer paper" -> A4 paper).
 
 price_line_item(item_name, quantity)
   List price (catalog unit price + 25% markup) minus the bulk discount:
     100+ units: 5%     500+ units: 10%     1000+ units: 15%
+  Only an item and quantity approved by check_availability can be priced; the
+  customer's description of it is also accepted and resolves to the same item.
   The catalog unit price is the supplier's price, used for restock costs and
   inventory value. After the largest discount, customers still pay
   1.25 x 0.85 = 1.0625 x cost, so every sale is profitable.
@@ -79,7 +90,8 @@ search_past_quotes(search_terms)
   Wraps search_quote_history to return up to 5 similar historical quotes.
 
 record_sale(item_name, quantity)                              [writes]
-  Refuses unless check_availability approved this exact item and quantity
+  Accepts the catalog name or the customer's description. Refuses unless
+  check_availability approved this exact item and quantity
   earlier in the same request; each approval can be used once. It re-runs the
   availability plan, writes a stock_orders transaction if a reorder is needed,
   then writes a sales transaction priced with the same function as
@@ -133,10 +145,15 @@ f) Tool calls run one at a time.
    Every agent now uses max_tool_threads=1, and record_sale also holds a lock
    around its check-then-write.
 
-g) Unstocked paper sizes are not matched.
-   "A3 paper" fuzzy-matched to "A4 paper", and the agents sold A4 as a
-   substitute. find_catalog_items now rejects A-series sizes the catalog does
-   not stock.
+g) Catalog matching happens once, in Python.
+   Originally a find_catalog_items tool returned up to 5 candidates and each
+   agent picked one. Agents picked inconsistently: "A3 paper" was sold as A4
+   paper; "colorful construction paper" was approved as Colored paper even
+   though the matcher ranked Construction paper first; and in another request
+   the inventory agent approved Cardstock but the quoting agent re-matched the
+   customer's wording and quoted Colored paper. Now check_availability does
+   the matching itself, quoting and sales resolve the customer's wording to
+   the item already matched, and only approved items can be priced or sold.
 
 h) Inventory tracking for new items.
    When a catalog item that was not in the starting inventory is reordered, it
@@ -166,7 +183,7 @@ and the database passed SQLite's integrity check afterwards.
                                      could be ready by the deadline or was
                                      in the catalog.
   Sales priced exactly at cost x 1.25
-  less the bulk discount:            34 of 34
+  less the bulk discount:            33 of 33
   Sales below cost:                  0
   Stock orders without a sale:       0
   Items with negative stock:         0
@@ -174,14 +191,20 @@ and the database passed SQLite's integrity check afterwards.
   costs, markup or cash:             0
   Replies asking the customer to
   confirm instead of selling:        0
-  Sales blocked by the approval
-  guard:                             6. Each was the sales agent trying a
-                                     different catalog item than the one
-                                     approved for that line; the approved
-                                     item was sold instead.
+  Quotes/sales rejected as not
+  approved:                          13, all near-miss names (e.g. "Washi
+                                     tape" for "Decorative adhesive tape
+                                     (washi tape)"). Each time the agent
+                                     retried with the approved name; every
+                                     approved item in every request was
+                                     sold.
+  Colorful cardstock / colorful
+  construction paper:                sold as Cardstock (request 12, $35.62)
+                                     and Construction paper (request 6,
+                                     $39.38).
 
   Starting position:  cash $45,059.70, inventory $4,940.30, total $50,000.00
-  Final position:     cash $46,524.83, inventory $4,483.90, total $51,008.73
+  Final position:     cash $46,635.20, inventory $4,372.40, total $51,007.60
 
 Typical outcomes:
   - Fulfilled from stock with bulk discount (request 1: 200 glossy, 100
@@ -198,11 +221,15 @@ Typical outcomes:
 
 6. KNOWN LIMITATIONS AND POSSIBLE IMPROVEMENTS
 ----------------------------------------------
-- Catalog matching is imperfect. Request 12 asked for "colorful cardstock"
-  and was sold Colored paper ($23.75; Cardstock would have been $35.62), and
-  the reply still called it "colorful cardstock". Request 6's "colorful
-  construction paper" was likewise sold as Colored paper rather than
-  Construction paper. An LLM-ranked or embedding-based match would help.
+- The matcher is a word-overlap heuristic tuned on the sample requests.
+  Wording unlike any catalog name (e.g. a brand name) needs an alias, and
+  attributes other than the main noun and paper size, such as "recycled" in
+  "recycled cardstock", are ignored. An embedding-based match would be more
+  general.
+- If the LLM paraphrases a description instead of copying it, the matcher
+  sees the paraphrase.
+- If two requested lines match the same catalog item, the second check
+  replaces the first approval.
 - If the sales agent tries a different item than the one approved, the
   guard blocks it; the agent usually retries with the approved item, but in
   one earlier run it did not and an available item went unsold.

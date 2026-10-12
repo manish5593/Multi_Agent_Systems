@@ -46,7 +46,7 @@
   <text x="776" y="140" class="box-text">date: transaction date for this request</text>
   <text x="776" y="158" class="box-text">deadline: e.g. "April 15, 2025" → 2025-04-15</text>
   <text x="776" y="176" class="box-text">approved: {item: quantity} from availability checks</text>
-  <text x="776" y="198" class="small" fill="#b45309">Used by check_availability and record_sale</text>
+  <text x="776" y="198" class="small" fill="#b45309">Used by check_availability, price_line_item, record_sale</text>
   <path d="M700,134 L756,134" class="ctx"/>
 
   <!-- Orchestrator -->
@@ -62,13 +62,13 @@
   <!-- Worker agents -->
   <rect x="40" y="430" width="320" height="200" rx="10" fill="#ecfdf5" stroke="#059669" stroke-width="1.5"/>
   <text x="56" y="457" class="box-title">Inventory agent</text>
-  <text x="56" y="477" class="box-text">Maps customer wording to one catalog item</text>
-  <text x="56" y="494" class="box-text">and checks it can be ready by the deadline</text>
-  <text x="56" y="522" class="tool">find_catalog_items</text>
-  <text x="56" y="538" class="small">fuzzy match + aliases; rejects unstocked sizes (A3)</text>
-  <text x="56" y="562" class="tool">check_availability</text>
-  <text x="56" y="578" class="small">read-only: stock, supplier lead time, cash;</text>
-  <text x="56" y="594" class="small">records an approval for item + quantity</text>
+  <text x="56" y="477" class="box-text">Passes each line of the customer's wording</text>
+  <text x="56" y="494" class="box-text">verbatim; Python picks the catalog item</text>
+  <text x="56" y="522" class="tool">check_availability</text>
+  <text x="56" y="538" class="small">matches wording to one item (word overlap,</text>
+  <text x="56" y="553" class="small">main noun, aliases; no A3/A5); read-only check</text>
+  <text x="56" y="568" class="small">of stock, supplier lead time and cash;</text>
+  <text x="56" y="583" class="small">records an approval for item + quantity</text>
 
   <rect x="390" y="430" width="320" height="200" rx="10" fill="#eff6ff" stroke="#2563eb" stroke-width="1.5"/>
   <text x="406" y="457" class="box-title">Quoting agent</text>
@@ -79,7 +79,7 @@
   <text x="406" y="553" class="small">less 5% at 100+, 10% at 500+, 15% at 1000+</text>
   <text x="406" y="577" class="tool">search_past_quotes</text>
   <text x="406" y="593" class="small">similar historical quotes for context</text>
-  <text x="406" y="615" class="tool">find_catalog_items</text>
+  <text x="406" y="615" class="small">only approved items can be priced</text>
 
   <rect x="740" y="430" width="320" height="200" rx="10" fill="#fdf2f8" stroke="#db2777" stroke-width="1.5"/>
   <text x="756" y="457" class="box-title">Sales agent</text>
@@ -89,7 +89,6 @@
   <text x="756" y="554" class="small">reorders stock if needed, then records</text>
   <text x="756" y="570" class="small">the sale at the quoted price (locked)</text>
   <text x="756" y="594" class="tool">check_cash_balance</text>
-  <text x="756" y="614" class="tool">find_catalog_items</text>
 
   <!-- Delegation arrows -->
   <path d="M400,353 L230,426" class="flow"/>
