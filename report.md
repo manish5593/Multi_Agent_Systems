@@ -51,8 +51,8 @@ Results are in [`test_results.csv`](test_results.csv), from a full run of `quote
 | Lines declined because less than 50% could be ready by the deadline | 4 |
 | Lines declined because nothing could be ready by the deadline | 6 |
 | Lines declined because the item is not carried | 11 (mostly A3/A5 paper; also balloons, cardboard, tickets) |
-| Approved lines left unsold | 0 (request 18's line was skipped, then sold by the follow-up) |
-| Final replies failing the reply check | 0 (5 rewritten, all on the first attempt) |
+| Approved lines left unsold | 0 |
+| Final replies failing the reply check | 0 (7 rewritten, all on the first attempt) |
 | Sales priced exactly at cost × 1.25 less the bulk discount | 39 / 39 |
 | Sales below cost | 0 |
 | Stock bought without a matching sale | 0 |
@@ -100,7 +100,7 @@ Results are in [`test_results.csv`](test_results.csv), from a full run of `quote
 ### Weaknesses
 
 - **Many lines are only partly filled (12 of 60).** Supplier lead time is fixed by `get_supplier_delivery_date`, and only about 40% of catalog items start in stock, so later requests with April 15 deadlines can only be partly met.
-- **The agents still need correcting.** In this run the orchestrator skipped request 18's approved line, and 5 of 20 first-draft replies failed the reply check, mostly by presenting a partial line as complete or leaving out the total. The Python follow-ups caught every case, but they add LLM calls, and they only check what they're written to check, not, for example, delivery dates or per-line prices.
+- **The agents still need correcting.** In this run 7 of 20 first-draft replies failed the reply check, mostly by presenting a partial line as complete or mentioning the internal partial-order minimum. In the previous run the orchestrator also skipped an approved line (request 18), which the unsold-line follow-up caught; that didn't recur this time. The Python follow-ups caught every case, but they add LLM calls, and they only check what they're written to check, not, for example, delivery dates or per-line prices.
 - **Matching is a heuristic.** It uses word overlap, a main-noun bonus and a few aliases, tuned on the sample wording. Brand names or unusual wording would need new aliases, and attributes like "recycled" or "white" are ignored.
 - **Some behavior still relies on the LLM following instructions,** such as copying the customer's wording verbatim and always selling available items. The tool guards prevent wrong sales, but they can't force a sale the agent skips.
 
@@ -124,7 +124,7 @@ The system went through about a dozen test runs. Each fix below came from a spec
 | Orchestrator declined a whole order, leaving an approved line unsold | Python checks for unsold approvals and sends the orchestrator back once |
 | Replies asked to proceed after a sale, or presented partial lines as complete | Python checks the reply against recorded sales and asks for a rewrite |
 | Rewrites fixed the flagged point but dropped another | The rewrite prompt lists every requirement, with up to two rewrites |
-| An item re-checked after its sale could be approved, and sold, again | Items already sold in a request are not re-approved (tested offline; added after the final run) |
+| An item re-checked after its sale could be approved, and sold, again | Items already sold in a request are not re-approved (no such re-check occurred in the final run, so tested offline only) |
 
 ## 5. Suggested improvements
 
