@@ -592,11 +592,13 @@ def search_quote_history(search_terms: List[str], limit: int = 5) -> List[Dict]:
 import json
 import re
 import threading
+import openai
 from smolagents import OpenAIServerModel, ToolCallingAgent, tool
 
 # Deterministic business logic, kept in small modules next to this file
 from fulfillment import StockPosition, meets_partial_minimum, plan_fulfillment, plan_partial, MIN_PARTIAL_FRACTION
-from matching import CatalogMatcher, normalize_description
+from catalog_ranking import HybridCatalogMatcher
+from matching import normalize_description
 from pricing import price_line
 from reply_validation import MAX_REPLY_REWRITES, reply_problems, reply_requirements
 from validate_results import check_results, report as report_result_checks
@@ -604,15 +606,25 @@ from validate_results import check_results, report as report_result_checks
 # Set up and load your env parameters and instantiate your model.
 dotenv.load_dotenv()
 
+API_BASE = "https://openai.vocareum.com/v1"
 model = OpenAIServerModel(
     model_id=os.getenv("OPENAI_MODEL_ID", "gpt-4o-mini"),
-    api_base="https://openai.vocareum.com/v1",
+    api_base=API_BASE,
     api_key=os.getenv("UDACITY_OPENAI_API_KEY"),
 )
 
+# Embeddings for ranking catalog items (see catalog_ranking.py)
+EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "text-embedding-3-large")
+_embedding_client = openai.OpenAI(base_url=API_BASE, api_key=os.getenv("UDACITY_OPENAI_API_KEY"))
+
+
+def _embed(texts: List[str]) -> List[List[float]]:
+    response = _embedding_client.embeddings.create(model=EMBEDDING_MODEL, input=texts)
+    return [item.embedding for item in response.data]
+
 # Business rules shared by the tools
 CATALOG = {item["item_name"]: item for item in paper_supplies}
-catalog_matcher = CatalogMatcher(CATALOG)
+catalog_matcher = HybridCatalogMatcher({name: item["category"] for name, item in CATALOG.items()}, _embed)
 DEFAULT_MIN_STOCK_LEVEL = 100
 # Serializes check-then-write in record_sale so concurrent calls cannot oversell or corrupt SQLite
 _db_write_lock = threading.Lock()

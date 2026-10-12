@@ -24,8 +24,10 @@ CODE STRUCTURE
                        database wrappers, per-request state, the agent
                        tools, the four agents, the follow-up checks and
                        the test loop.
-  matching.py          CatalogMatcher: maps customer wording to one
-                       catalog item (aliases, quantity stripping, sizes).
+  matching.py          CatalogMatcher: deterministic rules (exact name,
+                       unstocked sizes, aliases) and the lexical score.
+  catalog_ranking.py   HybridCatalogMatcher: the rules, then an embedding
+                       shortlist, then lexical + embedding score.
   pricing.py           Markup and bulk-discount pricing of a line.
   fulfillment.py       Full and partial fulfillment planning, and the 50%
                        partial-order minimum.
@@ -33,8 +35,12 @@ CODE STRUCTURE
   validate_results.py  Automated checks on test_results.csv (see below).
   test_validate_results.py
                        Unit tests showing each check catches its problem.
+  test_catalog_ranking.py
+                       Offline tests of the hybrid matcher (fake vectors).
+  evaluate_matching.py Compares the lexical and hybrid matchers on 88
+                       labeled descriptions (calls the embeddings API).
 
-The four modules are pure logic: they don't touch the database or the
+The modules are pure logic: they don't touch the database or the
 request state, so they can be tested on their own. project_starter.py
 passes in what they need (stock position, supplier lead-time function,
 sales recorded). They must sit in the same folder as project_starter.py.
@@ -90,8 +96,9 @@ check_availability(description, quantity)                     [read-only]
   database, but records an approval for the matched item and the full or
   partial quantity, and remembers which item the description matched.
 
-Catalog matching (_best_catalog_match)
-  Deterministic; no agent chooses between candidates.
+Catalog matching (catalog_matcher.best_match)
+  Done in Python; no agent chooses between candidates. Deterministic rules
+  come first (matching.py):
   - A leading order quantity ("250,000 sheets of", "2000") is removed first,
     so its digits cannot match items like "250 gsm cardstock". Spec numbers
     followed by gsm or lb are kept.
@@ -99,15 +106,31 @@ Catalog matching (_best_catalog_match)
   - Aliases for wording unlike any catalog name ("printer paper" / "copy
     paper" -> Standard copy paper, "poster board" -> Large poster paper
     (24x36 inches)), unless the request names a stocked size such as A4.
-  - Otherwise each item is scored by the share of its name words found in
-    the description (plurals normalized), plus a bonus if it contains the
-    description's main noun (its last word, e.g. "cardstock" in "colorful
-    cardstock"), plus a little string similarity to break ties. Items must
-    share at least one word with the description, so "cardboard" or
-    "tickets" match nothing.
-  On every item phrase in the 20 sample requests, the matcher picks the
-  intended item (e.g. "colorful construction paper" -> Construction paper,
-  "kraft paper envelopes" -> Envelopes, "A4 white printer paper" -> A4 paper).
+  Then the catalog is ranked (catalog_ranking.py):
+  - The description and each "item (category)" are embedded with
+    text-embedding-3-large (EMBEDDING_MODEL in .env overrides it).
+  - Only the 3 items most similar by embedding are candidates, and if the
+    best similarity is below 0.42 nothing matches.
+  - Candidates are scored by the lexical score (share of the item's name
+    words in the description, plus a bonus for containing its main noun,
+    e.g. "cardstock" in "colorful cardstock") plus the cosine similarity;
+    below 0.6 nothing matches.
+  - Embeddings are cached. If the embeddings API fails, that lookup falls
+    back to the lexical matcher alone and a warning is printed.
+  The matcher only decides which item a description means: approval,
+  single-use sales, the already-sold check and every transaction guard
+  apply to its answer unchanged.
+
+  Measured by evaluate_matching.py on 88 labeled descriptions:
+                          lexical only   hybrid
+    sample wording           41/41        41/41
+    paraphrases              19/31        25/31
+    items we don't sell      15/16        16/16
+    held-out half            16/23        20/23
+  The hybrid fixes paraphrases like "post-it notes", "tablecloths", "gift
+  wrap" and "lanyard badges", and stops "paper clips" matching Paper cups.
+  The parameters were tuned on the sample wording plus half the paraphrases
+  and negatives; the held-out half was not used for tuning.
 
 price_line_item(item_name, quantity)
   List price (catalog unit price + 25% markup) minus the bulk discount:
@@ -269,12 +292,17 @@ for a per-request table.
     under 50% ready by deadline:     4 (declined)
     nothing ready by the deadline:   6
     not carried:                     11 (mostly A3/A5 paper)
-  Unsold-line follow-ups:            2 (requests 7 and 18; both lines were
-                                     then sold)
+  Unsold-line follow-ups:            0 (earlier runs needed 1-2, e.g.
+                                     requests 7 and 18; the lines were sold)
   Replies rewritten after the
-  reply check:                       5, all passing on the first rewrite
-  New read-only tools used:          list_inventory 4 times,
-                                     financial_summary 20 times
+  reply check:                       5 (request 10 needed a second rewrite
+                                     to state its total); all pass
+  Embedding lookups that fell back
+  to the lexical matcher:            0
+  Wording matched differently from
+  the lexical-only run:              0 (12 new phrasings, all correct)
+  New read-only tools used:          list_inventory 7 times,
+                                     financial_summary 19 times
   Final replies failing the check:   0
   Sales priced exactly at cost x 1.25
   less the bulk discount:            39 of 39
@@ -293,11 +321,11 @@ for a per-request table.
 
 6. KNOWN LIMITATIONS AND POSSIBLE IMPROVEMENTS
 ----------------------------------------------
-- The matcher is a word-overlap heuristic tuned on the sample requests.
-  Wording unlike any catalog name (e.g. a brand name) needs an alias, and
-  attributes other than the main noun and paper size, such as "recycled" in
-  "recycled cardstock", are ignored. An embedding-based match would be more
-  general.
+- Catalog matching still misses some wording: "card stock" as two words
+  matches 100 lb cover stock, "8.5x11 paper" matches A4 paper, and
+  "leaflets" / "handouts" match nothing (6 of 31 paraphrases). The labeled
+  set is small and written by us, so its numbers are indicative, not a
+  benchmark. Each lookup of new wording adds an embeddings API call.
 - If the LLM paraphrases a description instead of copying it, the matcher
   sees the paraphrase.
 - If two requested lines match the same catalog item, the second check

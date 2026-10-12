@@ -53,8 +53,8 @@ Results are in [`test_results.csv`](test_results.csv), from a full run of `quote
 | Lines declined because less than 50% could be ready by the deadline | 4 |
 | Lines declined because nothing could be ready by the deadline | 6 |
 | Lines declined because the item is not carried | 11 (mostly A3/A5 paper; also balloons, cardboard, tickets) |
-| Approved lines left unsold | 0 (lines skipped in requests 7 and 18 were sold by the follow-up) |
-| Final replies failing the reply check | 0 (5 rewritten, all on the first attempt) |
+| Approved lines left unsold | 0 |
+| Final replies failing the reply check | 0 (5 rewritten; request 10 needed a second rewrite) |
 | Sales priced exactly at cost × 1.25 less the bulk discount | 39 / 39 |
 | Sales below cost | 0 |
 | Stock bought without a matching sale | 0 |
@@ -99,15 +99,15 @@ Results are in [`test_results.csv`](test_results.csv), from a full run of `quote
 
 - **Prices and the books are correct by construction.** Prices come from one function shared by quoting and sales. Dates come from Python. Stock is bought only inside `record_sale`, for items actually sold. Every sale matched the expected price, and no stock order lacks a matching sale.
 - **Deadlines are respected, and as much as possible is still sold.** When the full quantity can't be ready in time, the system sells what can: current stock plus the largest supplier order that arrives by the deadline. For example, request 14 got 1,000 of 2,000 sheets of poster paper by April 13. A partial line is only sold if at least half the request can be ready, so a customer isn't sent, say, 135 of 10,000 sheets.
-- **Catalog matching is consistent.** Everyday wording maps to the right item, for example "colorful cardstock" to Cardstock, "colorful construction paper" to Construction paper, and "poster boards (24" x 36")" to Large poster paper. Paper sizes the catalog doesn't stock, such as A3 and A5, are declined, not swapped for A4.
+- **Catalog matching handles unfamiliar wording.** Deterministic rules (exact names, unstocked sizes like A3, aliases) come first, then an embedding shortlist with a lexical + embedding score. On 88 labeled descriptions it keeps all 41 sample-request phrasings right, gets 25 of 31 paraphrases (the lexical matcher alone got 19) and rejects all 16 items we don't sell (15 before); on the held-out half not used for tuning it scores 20 of 23 against 16. "post-it notes" now maps to Sticky notes and "tablecloths" to Table covers, and "paper clips" no longer matches Paper cups.
 - **Large orders work.** Request 3's 500 reams were converted to 250,000 sheets, restocked in time, and sold at a profit: $10,625.00 in revenue against a $10,004.00 restock cost.
 - **Replies are customer-safe.** They list items, prices, discounts and delivery dates, and never mention stock levels, costs, the markup or cash.
 
 ### Weaknesses
 
 - **Many lines are only partly filled (12 of 60).** Supplier lead time is fixed by `get_supplier_delivery_date`, and only about 40% of catalog items start in stock, so later requests with April 15 deadlines can only be partly met.
-- **The agents still need correcting.** In this run 5 of 20 first-draft replies failed the reply check, mostly by presenting a partial line as complete (one left out the total, and one asked the customer to confirm after the sale), and the orchestrator skipped approved lines in requests 7 and 18, which the unsold-line follow-up then sold. Across recent runs, 5 to 7 replies a run needed a rewrite. The Python follow-ups caught every case, but they add LLM calls, and they only check what they're written to check, not, for example, delivery dates or per-line prices.
-- **Matching is a heuristic.** It uses word overlap, a main-noun bonus and a few aliases, tuned on the sample wording. Brand names or unusual wording would need new aliases, and attributes like "recycled" or "white" are ignored.
+- **The agents still need correcting.** In this run 5 of 20 first-draft replies failed the reply check, by presenting a partial line as complete or leaving out the total, and request 10 needed a second rewrite. In earlier runs the orchestrator also skipped approved lines (e.g. requests 7 and 18), which the unsold-line follow-up then sold. Across recent runs, 5 to 7 replies a run needed a rewrite. The Python follow-ups caught every case, but they add LLM calls, and they only check what they're written to check, not, for example, delivery dates or per-line prices.
+- **Matching still misses some wording.** "card stock" (two words) still matches 100 lb cover stock and "8.5x11 paper" matches A4 paper, and "leaflets" or "handouts" match nothing. The labeled set is small and our own, so the improvement is indicative. If the embeddings API is down, matching falls back to the lexical matcher.
 - **Some behavior still relies on the LLM following instructions,** such as copying the customer's wording verbatim and always selling available items. The tool guards prevent wrong sales, but they can't force a sale the agent skips.
 
 ## 4. What testing changed
@@ -130,12 +130,13 @@ The system went through about a dozen test runs. Each fix below came from a spec
 | Orchestrator declined a whole order, leaving an approved line unsold | Python checks for unsold approvals and sends the orchestrator back once |
 | Replies asked to proceed after a sale, or presented partial lines as complete | Python checks the reply against recorded sales and asks for a rewrite |
 | Rewrites fixed the flagged point but dropped another | The rewrite prompt lists every requirement, with up to two rewrites |
+| The lexical matcher missed paraphrases ("post-it notes", "tablecloths") and matched "paper clips" to Paper cups | Embedding shortlist + lexical score after the deterministic rules; measured on labeled descriptions (`evaluate_matching.py`) |
 | An item re-checked after its sale could be approved, and sold, again | Items already sold in a request are not re-approved (no such re-check occurred in the final run, so tested offline only) |
 
 ## 5. Suggested improvements
 
 1. **Backorders.** Partial fulfillment ships what can arrive by the deadline and declines the rest. Offering the remainder as a backorder with its later date would suit customers whose deadline is flexible.
-2. **Smarter matching.** Use embeddings, or an LLM ranking step limited to the catalog, to handle unfamiliar wording and attributes like "recycled".
+2. **Better matching data.** Expand the labeled set with real customer wording, add catalog synonyms (e.g. "leaflets" for Flyers, "letter" for Letter-sized paper) to the embedded item text, and re-tune.
 3. **Better restocking.** Restock popular items ahead of demand instead of only when an order needs them, so more April 15 deadlines can be met.
 4. **Structured handoffs.** Have agents pass JSON item lists, not free text, to remove the remaining LLM-dependent steps.
 

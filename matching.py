@@ -4,7 +4,7 @@ Pure logic: no database access and no per-request state.
 """
 import difflib
 import re
-from typing import Iterable, List, Union
+from typing import Iterable, List, Tuple, Union
 
 # Common customer wording that does not resemble the catalog name
 CATALOG_ALIASES = {
@@ -49,41 +49,52 @@ class CatalogMatcher:
         """Return the exact catalog name, ignoring case and surrounding whitespace."""
         return self._by_lower_name.get(str(item_name).strip().lower())
 
-    def best_match(self, description: str) -> Union[str, None]:
+    def apply_rules(self, description: str) -> Tuple[bool, Union[str, None]]:
         """
-        Pick the single catalog item that best matches a customer's description, or None.
-
-        Score = share of the item's name words found in the description, plus a bonus when the
-        item contains the description's main noun (its last word), plus a little string similarity
-        to break ties. Items must share at least one word with the description.
+        Deterministic rules that decide a match outright: an exact catalog name, a paper size the
+        catalog doesn't stock (no match), or an alias. Returns (decided, item); when decided is
+        False, the caller ranks the catalog.
         """
         exact = self.exact(description)
         if exact:
-            return exact
+            return True, exact
         description = strip_quantity(description)
-        query_words = set(match_words(description))
-        # Main noun: last word, ignoring parenthetical details like "(white)"
-        head_words = match_words(re.sub(r"\([^)]*\)", " ", description))
-        head = head_words[-1] if head_words else None
-
-        sizes = {w for w in query_words if re.fullmatch(r"a\d", w)}
+        sizes = {w for w in match_words(description) if re.fullmatch(r"a\d", w)}
         if sizes - self._sizes:
-            return None  # e.g. A3 or A5: we only stock A4, so do not fuzzy-match to A4 paper
+            return True, None  # e.g. A3 or A5: we only stock A4, so do not fuzzy-match to A4 paper
         if not sizes:
             for alias, name in CATALOG_ALIASES.items():
                 if alias in normalize_description(description):
-                    return name
+                    return True, name
+        return False, None
 
+    def lexical_score(self, description: str, name: str) -> float:
+        """
+        Share of the item's name words found in the (quantity-stripped) description, plus a bonus
+        when the item contains the description's main noun (its last word), plus a little string
+        similarity to break ties. 0 if they share no words.
+        """
+        name_words = set(match_words(name))
+        overlap = len(set(match_words(description)) & name_words)
+        if overlap == 0:
+            return 0.0
+        # Main noun: last word, ignoring parenthetical details like "(white)"
+        head_words = match_words(re.sub(r"\([^)]*\)", " ", description))
+        head = head_words[-1] if head_words else None
+        score = overlap / len(name_words)
+        if head in name_words:
+            score += 0.5
+        return score + 0.25 * difflib.SequenceMatcher(None, description.lower(), name.lower()).ratio()
+
+    def best_match(self, description: str) -> Union[str, None]:
+        """Pick the single catalog item that best matches a customer's description, or None."""
+        decided, item = self.apply_rules(description)
+        if decided:
+            return item
+        description = strip_quantity(description)
         best_score, best_name = 0.0, None
         for name in self.names:
-            name_words = set(match_words(name))
-            overlap = len(query_words & name_words)
-            if overlap == 0:
-                continue
-            score = overlap / len(name_words)
-            if head in name_words:
-                score += 0.5
-            score += 0.25 * difflib.SequenceMatcher(None, description.lower(), name.lower()).ratio()
+            score = self.lexical_score(description, name)
             if score > best_score:
                 best_score, best_name = score, name
         return best_name

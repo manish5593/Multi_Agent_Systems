@@ -72,7 +72,7 @@
   <text x="56" y="574" class="tool">check_availability</text>
   <text x="56" y="589" class="helper">uses: get_stock_level,</text>
   <text x="56" y="603" class="helper">get_supplier_delivery_date, get_cash_balance</text>
-  <text x="56" y="618" class="small">matches wording to one item (no A3/A5); read-only;</text>
+  <text x="56" y="618" class="small">matches wording: rules, then embeddings; read-only;</text>
   <text x="56" y="633" class="small">approves the full quantity, or the part ready</text>
   <text x="56" y="648" class="small">by the deadline if it is at least 50%</text>
 
