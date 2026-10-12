@@ -33,7 +33,7 @@ Python handles several things before and around the agents:
 - **Approvals:** during the request it tracks which item and quantity `check_availability` approved for each line.
 - **The guard:** only approved items can be quoted or sold, and each approval can be used only once.
 - **Concurrency:** all tools run one at a time, and sale writes are locked.
-- **After the agents finish:** if any approved line was not sold, the orchestrator is sent back once to sell it and rewrite the reply.
+- **After the agents finish:** if any approved line was not sold, the orchestrator is sent back once to sell it and rewrite the reply. Python then checks the reply against the recorded sales: the correct total, the requested quantity for partial lines, no request to confirm after a sale, and no internal details. If it fails, the orchestrator is asked to rewrite it, up to twice, with the full list of what the reply must contain.
 
 ## 3. Evaluation of test results
 
@@ -73,18 +73,18 @@ Results are in [`test_results.csv`](test_results.csv), from a full run of `quote
 | 4 | 04-05 | Cardstock 500, A4 paper 250 | $99.22 | — |
 | 5 | 04-05 | Colored paper 500, Cardstock 300, Washi tape 200 | $157.19 | — |
 | 6 | 04-06 | Construction paper 500, Standard copy paper 300, Cardstock 200 | $89.25 | — |
-| 7 | 04-07 | Glossy paper 500, Large poster paper 300, Cardstock 200 | $504.37 | A3 matte paper (not carried) |
+| 7 | 04-07 | Glossy paper 500, Large poster paper 300, Cardstock 200 | $504.37 | matte A3 paper (not carried) |
 | 8 | 04-07 | Glossy paper 500, Matte paper 1,000, Recycled paper 3,000 | $558.75 | A5 colored paper (not carried) |
-| 9 | 04-07 | A4 paper 135 of 200 | $8.02 | Envelopes (deadline Apr 10); A3 glossy paper (not carried) |
+| 9 | 04-07 | A4 paper 135 of 200 | $8.02 | Envelopes (deadline); A3 glossy paper (not carried) |
 | 10 | 04-08 | Glossy paper 500, Cardstock 300 | $165.94 | — |
 | 11 | 04-08 | Matte paper 300 | $64.12 | A3 glossy paper (not carried) |
 | 12 | 04-08 | Cardstock 200, Standard copy paper 500, Paper napkins 100 | $60.50 | — |
-| 13 | 04-08 | Cardstock 148 of 200 | $26.36 | A4 paper (deadline Apr 10) |
-| 14 | 04-09 | Cardstock 500, Poster paper 1,000 of 2,000 | $350.00 | A4 paper (under 50% by deadline) |
-| 15 | 04-12 | — | — | A4 paper (under 50% by deadline); A3 colored paper, cardboard (not carried) |
-| 16 | 04-13 | Construction paper 100 of 200, Large poster paper 100 | $127.06 | A4 paper (deadline) |
-| 17 | 04-14 | Paper plates 500 | $56.25 | paper napkins (under 50%), A4 paper, paper cups (deadline); A3 colored paper (not carried) |
-| 18 | 04-14 | Colored paper 188 of 200 | $22.32 | cardstock, copy paper (under 50% by deadline) |
+| 13 | 04-08 | Cardstock 148 of 200 | $26.36 | A4 paper (deadline) |
+| 14 | 04-09 | Poster paper 1,000 of 2,000, Cardstock 500 | $350.00 | A4 paper (under 50% by deadline) |
+| 15 | 04-12 | — | — | A4 paper (deadline); A3 colored paper (assorted colors), cardboard for signage (not carried) |
+| 16 | 04-13 | Large poster paper 100, Construction paper 100 of 200 | $127.06 | A4 paper (deadline) |
+| 17 | 04-14 | Paper plates 500 | $56.25 | Paper napkins (under 50% by deadline); A4 paper, Paper cups (deadline); A3 colored paper (assorted colors) (not carried) |
+| 18 | 04-14 | Colored paper 188 of 200 | $22.32 | Cardstock, Standard copy paper (under 50% by deadline) |
 | 19 | 04-15 | Glossy paper 1,000 of 2,000, Cardstock 1,000 | $371.88 | A3 matte paper (not carried) |
 | 20 | 04-17 | Flyers 5,000, Poster paper 2,000 | $1,328.13 | tickets (not carried) |
 
@@ -121,6 +121,7 @@ The system went through about a dozen test runs. Each fix below came from a spec
 | Lines that couldn't be fully ready by the deadline were declined outright | Partial fulfillment: sell what can be ready in time |
 | Partial sales as small as 135 of 10,000 sheets | Partial lines need at least 50% of the requested quantity |
 | Orchestrator declined a whole order, leaving an approved line unsold | Python checks for unsold approvals and sends the orchestrator back once |
+| Replies asked to proceed after a sale, or presented partial lines as complete | Python checks the reply against recorded sales and asks for one rewrite |
 
 ## 5. Suggested improvements
 

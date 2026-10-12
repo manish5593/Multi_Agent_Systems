@@ -628,7 +628,13 @@ MARKUP_RATE = 0.25
 # so that every transaction uses the real dates rather than dates chosen by the LLM.
 # "approved" maps item name -> quantity confirmed by check_availability; only those can be quoted or sold.
 # "matched" maps each customer description checked this request -> the catalog item it matched.
-_request_context = {"date": None, "deadline": None, "approved": {}, "matched": {}}
+# "partial" maps item name -> requested quantity for lines approved only in part.
+# "sold" lists (item name, quantity, line total) for each sale recorded this request.
+_request_context = {"date": None, "deadline": None, "approved": {}, "matched": {}, "partial": {}, "sold": []}
+
+
+def _reset_request_context(date: Union[str, None] = None, deadline: Union[str, None] = None) -> None:
+    _request_context.update(date=date, deadline=deadline, approved={}, matched={}, partial={}, sold=[])
 DEADLINE_PATTERN = re.compile(
     r"(January|February|March|April|May|June|July|August|September|October|November|December)"
     r"\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+(\d{4})"
@@ -892,6 +898,11 @@ def check_availability(description: str, quantity: int) -> str:
         return json.dumps({"description": description, "item_name": None, "available": False,
                            "reason": "Not something we carry."})
     _request_context["matched"][_normalize_description(description)] = item_name
+    already_sold = sum(qty for name, qty, _ in _request_context["sold"] if name == item_name)
+    if already_sold:
+        # Re-checking after a sale must not approve the item again, or it could be sold twice
+        return json.dumps({"description": description, "item_name": item_name, "available": "already sold",
+                           "reason": f"{already_sold} x {item_name} was already sold in this request."})
     plan = _plan_fulfillment(item_name, quantity)
     result = {"description": description, "item_name": item_name, "quantity": quantity,
               "available": plan["available"]}
@@ -913,6 +924,7 @@ def check_availability(description: str, quantity: int) -> str:
             "reason": f"Only {partial['quantity']} of {quantity} can be ready by the deadline. {plan['reason']}",
         })
         _request_context["approved"][item_name] = partial["quantity"]
+        _request_context["partial"][item_name] = quantity
     else:
         result["reason"] = plan["reason"]
     return json.dumps(result)
@@ -988,6 +1000,7 @@ def _record_sale_locked(item_name: str, quantity: int) -> str:
     line_total = _price_line(item_name, quantity)["line_total"]
     transaction_id = create_transaction(item_name, "sales", quantity, line_total, sale_date)
     del _request_context["approved"][item_name]
+    _request_context["sold"].append((item_name, quantity, line_total))
     return (f"Sale recorded (transaction {transaction_id}): {quantity} x {item_name} for ${line_total:.2f}, "
             f"ready {plan['ready_date']}.")
 
@@ -1092,12 +1105,74 @@ orchestrator = ToolCallingAgent(
 )
 
 
+CONFIRMATION_PATTERN = re.compile(
+    r"would you like to proceed|like to proceed|please confirm|confirm (?:if|whether|that you)|"
+    r"let (?:me|us) know if you(?:'d| would) like (?:to|us to) (?:proceed|go ahead|continue)",
+    re.IGNORECASE,
+)
+ORDER_PLACED_PATTERN = re.compile(
+    r"successfully (?:placed|processed|recorded|finalized)|(?:order|sale) (?:has been|is) "
+    r"(?:placed|confirmed|recorded|processed)",
+    re.IGNORECASE,
+)
+INTERNAL_DETAIL_PATTERN = re.compile(
+    r"\bcash\b|\bfunds?\b|\bmarkup\b|\bmargin\b|supplier cost|restock(?:ing)? cost|\d[\d,]* (?:units|sheets) in stock|"
+    r"\d[\d,]* (?:units|sheets) (?:were|was) available|minimum (?:for a partial order|threshold)|"
+    r"\b(?:inventory_agent|quoting_agent|sales_agent|check_availability|price_line_item|record_sale)\b",
+    re.IGNORECASE,
+)
+
+
+MAX_REPLY_REWRITES = 2
+
+
+def _reply_requirements() -> str:
+    """Everything the reply must say about this request's sales, so a rewrite can't fix one point and drop another."""
+    sold = _request_context["sold"]
+    if not sold:
+        return "Nothing was sold, so the reply must not say an order was placed or confirmed."
+    lines = []
+    for name, qty, line_total in sold:
+        requested = _request_context["partial"].get(name)
+        if requested:
+            lines.append(f"{qty} of the {requested:,} requested {name} for ${line_total:,.2f} (the rest is "
+                         f"unavailable by the deadline)")
+        else:
+            lines.append(f"{qty} {name} for ${line_total:,.2f}")
+    total = sum(line_total for _, _, line_total in sold)
+    return (f"The reply must list these sold items: {'; '.join(lines)}; state the total of ${total:,.2f}; "
+            f"not ask the customer to confirm or proceed, because the sale is already recorded; and not "
+            f"mention cash, markup, costs, stock counts, the partial-order minimum or internal agents.")
+
+
+def _reply_problems(reply: str) -> List[str]:
+    """Check the customer reply against what was actually recorded during this request."""
+    problems = []
+    numbers = reply.replace(",", "")
+    sold = _request_context["sold"]
+    if sold:
+        total = sum(line_total for _, _, line_total in sold)
+        if f"{total:.2f}" not in numbers:
+            items = "; ".join(f"{qty} x {name} ${line_total:.2f}" for name, qty, line_total in sold)
+            problems.append(f"State the total of ${total:,.2f} for the items sold ({items}).")
+        if CONFIRMATION_PATTERN.search(reply):
+            problems.append("The sale is already recorded, so do not ask the customer to confirm or whether to proceed.")
+        for name, qty, _ in sold:
+            requested = _request_context["partial"].get(name)
+            if requested and str(requested) not in numbers:
+                problems.append(f"Say that {qty} of the {requested:,} requested {name} will be supplied, "
+                                f"and that the rest is unavailable by the deadline.")
+    elif ORDER_PLACED_PATTERN.search(reply):
+        problems.append("No sale was recorded, so do not say the order was placed or confirmed.")
+    leaked = sorted({m.group(0).lower() for m in INTERNAL_DETAIL_PATTERN.finditer(reply)})
+    if leaked:
+        problems.append(f"Remove internal details: {', '.join(leaked)}.")
+    return problems
+
+
 def call_multi_agent_system(request: str, request_date: str) -> str:
-    _request_context["date"] = request_date
     request = _convert_reams_to_sheets(request)
-    _request_context["deadline"] = _parse_deadline(request, request_date)
-    _request_context["approved"] = {}
-    _request_context["matched"] = {}
+    _reset_request_context(request_date, _parse_deadline(request, request_date))
     try:
         response = str(orchestrator.run(request, reset=True))
         # Approvals are removed as items are sold, so any left over are available lines the
@@ -1113,12 +1188,25 @@ def call_multi_agent_system(request: str, request_date: str) -> str:
                 f"request and every item that could not be supplied.",
                 reset=False,
             ))
+        # Check the reply against what was recorded, and ask for one rewrite if it does not match.
+        for attempt in range(1, MAX_REPLY_REWRITES + 1):
+            problems = _reply_problems(response)
+            if not problems:
+                break
+            print(f"REPLY CHECK FAILED: {problems}; asking the orchestrator to rewrite the reply (attempt {attempt})")
+            response = str(orchestrator.run(
+                "Your reply to the customer has these problems: " + " ".join(problems) + " "
+                + _reply_requirements() + " All sales are already recorded, so do not call any agents. "
+                "Rewrite the complete final reply to the customer.",
+                reset=False,
+            ))
+        else:
+            remaining = _reply_problems(response)
+            if remaining:
+                print(f"REPLY CHECK STILL FAILING after {MAX_REPLY_REWRITES} rewrites: {remaining}")
         return response
     finally:
-        _request_context["date"] = None
-        _request_context["deadline"] = None
-        _request_context["approved"] = {}
-        _request_context["matched"] = {}
+        _reset_request_context()
 
 
 # Run your test scenarios by writing them here. Make sure to keep track of them.

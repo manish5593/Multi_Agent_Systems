@@ -200,7 +200,21 @@ k) A follow-up for unsold approved lines.
    the orchestrator back (same conversation) to quote and sell them and
    rewrite the reply.
 
-l) Starter code fixes.
+l) A check on the customer reply.
+   The tools record every sale and the requested quantity of every partial
+   line, so Python can check the final reply against what happened. It
+   must state the total of the recorded sales; must not ask the customer to
+   confirm or proceed after a sale; must give the requested quantity for
+   each partial line (so "135 sheets" reads as "135 of the 200 requested");
+   must not claim an order was placed if nothing was sold; and must not
+   mention cash, markup, costs, stock counts, the partial-order minimum or
+   internal agent/tool names. If any check fails, the orchestrator is sent
+   back to rewrite the reply, up to twice. The rewrite prompt lists the
+   problems and every requirement (each sold line, partial wording and the
+   total): in testing, listing only the failing point led rewrites to fix
+   that point and drop another.
+
+m) Starter code fixes.
    run_test_scenarios() called init_database() without its required argument
    and printed an undefined `response`; both are fixed. One failed request is
    caught and logged so the run continues.
@@ -247,9 +261,9 @@ for a per-request table.
   replaces the first approval.
 - The follow-up for unsold approved lines runs once; if the orchestrator
   skips a line again, it stays unsold.
-- Reply wording can contradict what happened: in an earlier run, request
-  16's reply asked the customer whether to proceed although the sale was
-  already recorded.
+- The reply check is pattern-based. It verifies the total, partial
+  quantities and some phrasings, but not every claim (e.g. delivery dates or
+  per-line prices), and it asks for at most two rewrites.
 - If the sales agent tries a different item than the one approved, the
   guard blocks it; the agent usually retries with the approved item, but in
   one earlier run it did not and an available item went unsold.
