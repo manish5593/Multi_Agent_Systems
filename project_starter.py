@@ -781,9 +781,13 @@ def _best_catalog_match(description: str) -> Union[str, None]:
 
 
 def _resolve_requested_item(name_or_description: str) -> Union[str, None]:
-    """Map an exact catalog name, or a description already checked this request, to its catalog item."""
+    """
+    Map an exact catalog name, a description already checked this request, or a near-miss name
+    (e.g. "Washi tape", "A4 matte paper") to its catalog item. Callers still require approval.
+    """
     return (_resolve_item_name(name_or_description)
-            or _request_context["matched"].get(_normalize_description(name_or_description)))
+            or _request_context["matched"].get(_normalize_description(name_or_description))
+            or _best_catalog_match(name_or_description))
 
 
 def _not_approved_error(item: str, quantity: int, action: str) -> str:

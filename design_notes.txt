@@ -80,8 +80,10 @@ Catalog matching (_best_catalog_match)
 price_line_item(item_name, quantity)
   List price (catalog unit price + 25% markup) minus the bulk discount:
     100+ units: 5%     500+ units: 10%     1000+ units: 15%
-  Only an item and quantity approved by check_availability can be priced; the
-  customer's description of it is also accepted and resolves to the same item.
+  Only an item and quantity approved by check_availability can be priced. It
+  accepts the exact catalog name, the customer's description, or a near-miss
+  name (e.g. "Washi tape", "A4 matte paper"), which is run through the same
+  matcher; the approval check still applies.
   The catalog unit price is the supplier's price, used for restock costs and
   inventory value. After the largest discount, customers still pay
   1.25 x 0.85 = 1.0625 x cost, so every sale is profitable.
@@ -90,7 +92,8 @@ search_past_quotes(search_terms)
   Wraps search_quote_history to return up to 5 similar historical quotes.
 
 record_sale(item_name, quantity)                              [writes]
-  Accepts the catalog name or the customer's description. Refuses unless
+  Accepts the catalog name, the customer's description, or a near-miss name
+  (resolved as in price_line_item). Refuses unless
   check_availability approved this exact item and quantity
   earlier in the same request; each approval can be used once. It re-runs the
   availability plan, writes a stock_orders transaction if a reorder is needed,
@@ -192,12 +195,10 @@ and the database passed SQLite's integrity check afterwards.
   Replies asking the customer to
   confirm instead of selling:        0
   Quotes/sales rejected as not
-  approved:                          13, all near-miss names (e.g. "Washi
-                                     tape" for "Decorative adhesive tape
-                                     (washi tape)"). Each time the agent
-                                     retried with the approved name; every
-                                     approved item in every request was
-                                     sold.
+  approved:                          0 (the previous run had 13, all
+                                     near-miss names such as "Washi tape";
+                                     these now resolve via the matcher).
+  Approved items left unsold:        0
   Colorful cardstock / colorful
   construction paper:                sold as Cardstock (request 12, $35.62)
                                      and Construction paper (request 6,

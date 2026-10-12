@@ -1,145 +1,163 @@
 request_id,request_date,cash_balance,inventory_value,response
-1,2025-04-01,45136.88999999999,4875.3,"Your order has been successfully placed for delivery by April 1, 2025. You have ordered: 
-- 200 sheets of Glossy paper at $47.50 
-- 100 sheets of Cardstock at $17.81 
-- 100 sheets of Colored paper at $11.88 
+1,2025-04-01,45136.88999999999,4875.3,"Your order has been successfully placed for the following items, which will be delivered by April 1, 2025:
 
-The total cost for your order is $77.19. Everything will be ready before your requested date. Thank you!"
-2,2025-04-03,45125.31999999999,4905.3,"Thank you for placing your order with us! 
+- 200 sheets of Glossy paper: $47.50
+- 100 sheets of Cardstock: $17.81
+- 100 sheets of Colored paper: $11.88
 
-You have successfully ordered:
-- 500 sheets of **Colorful Poster Paper** at $140.62
-- 300 rolls of **Party Streamers** at $17.81
-
-**Total Amount:** $158.43
-
-Both items are set to be ready for delivery by **April 7, 2025**, which is before your requested date of April 15, 2025.
-
-Unfortunately, the **200 balloons** you requested are not available. 
-
-If you have any further questions or need assistance, feel free to ask!"
-3,2025-04-04,45784.42,4902.45,"Your order has been successfully placed for the following items:
-
-1. **A4 Paper**: 10,000 sheets at $0.0531 per unit, totaling **$531.25**.
-2. **Standard Copy Paper**: 250,000 sheets at $0.0425 per unit, totaling **$10,625.00**.
-
-**Overall Total**: **$11,156.25**.
-
-Delivery date is set for **April 11, 2025**.
-
-Please note that the requested **5,000 sheets of A3 paper** are unavailable, and therefore, have not been included in the order."
-4,2025-04-05,45848.19,4850.4,"Your order has been successfully placed! You will receive:
-- 500 sheets of Cardstock for $84.38
-- 250 sheets of A4 paper for $14.84
-
-The total for your order is $99.22. Both items will be delivered by April 15, 2025. 
-
-Unfortunately, there were no items that could not be supplied. Thank you for your order!"
-5,2025-04-05,45900.380000000005,4820.4,"Your order has been successfully placed and will be delivered by April 15, 2025. Here are the details:
-
-- 500 sheets of Colored paper: $56.25
-- 300 sheets of Cardstock: $53.44
-- 200 rolls of Decorative adhesive tape (washi tape): $47.50
-
-**Total Cost:** $157.19
+Total: $77.19
 
 Thank you for your order!"
-6,2025-04-06,45905.62999999999,4827.4,"Your order has been successfully placed for delivery by April 10, 2025. The items ordered include: 
-- 500 sheets of Construction paper at a total cost of $39.38
-- 300 sheets of Standard copy paper at a total cost of $14.25
-- 200 sheets of Cardstock at a total cost of $35.62
+2,2025-04-03,45125.31999999999,4905.3,"Your order has been successfully placed. You will receive: 
+- 500 sheets of Poster paper at $140.62 
+- 300 rolls of Party streamers at $17.81 
 
-The overall total for your order is $89.25. Thank you for your order!"
-7,2025-04-07,46328.0,4479.400000000001,"Dear Customer,\n\nThank you for your order! Here are the details of the items sold:  \n\n- 500 sheets of Glossy paper: $112.50 (Ready by April 11, 2025)\n- 300 sheets of Large poster paper (24x36 inches): $356.25 (Ready by April 7, 2025)\n- 200 sheets of Cardstock: $35.62 (Ready by April 11, 2025)\n\nTotal amount: $504.37\n\nPlease note that 1000 sheets of matte A3 paper are unavailable for delivery as it is not something we carry.\n\nShould you need anything else, please feel free to reach out!\n\nBest regards,"
-8,2025-04-07,46340.75,4505.400000000001,"Your order has been successfully placed for the following items with delivery scheduled by April 15, 2025:
+Total amount: $158.43.
 
-- 500 sheets of Glossy paper: Total $112.50 (Ready by April 11, 2025)
-- 1000 sheets of Matte paper: Total $191.25 (Ready by April 14, 2025)
-- 3000 sheets of Recycled paper: Total $255.00 (Ready by April 14, 2025)
+Both items will be ready for delivery on April 7, 2025. Unfortunately, the 200 balloons you requested are not available by the deadline."
+3,2025-04-04,45784.42,4902.45,"Your order has been successfully placed for 10,000 sheets of A4 paper and 250,000 sheets of printer paper. 
 
-**Overall Total:** $558.75
+- **A4 Paper**: 10,000 sheets at a total cost of $531.25.
+- **Printer Paper**: 250,000 sheets at a total cost of $10,625.00. 
 
-Please note, the A5 colored paper was not available and is not part of your order."
-9,2025-04-07,46340.75,4505.400000000001,"Thank you for your order request. Unfortunately, all the requested items are unavailable for delivery by April 10, 2025. Here are the details:
+Both items received a 15% bulk discount, bringing the overall total cost to **$11,156.25**. 
 
-- **A4 White Printer Paper**: 200 sheets requested (Not available, earliest restock on April 11, 2025).
-- **A3 Glossy Paper**: 100 sheets requested (Not carried in inventory).
-- **100% Recycled Kraft Paper Envelopes**: 50 packets requested (Not available, earliest restock on April 11, 2025).
+The supplies will be ready for delivery by **April 11, 2025**. 
 
-Given the urgency, it is recommended to seek alternative suppliers or products to meet your deadline. Thank you!"
-13,2025-04-08,46340.75,4505.400000000001,"I regret to inform you that both items you requested are unavailable for delivery by April 10, 2025. The A4 printing paper and cardstock do not have enough stock, and the earliest supplier delivery is scheduled for April 12, 2025, which is after your required date. Please consider alternative products or adjust your timeline."
-12,2025-04-08,46347.25,4507.400000000001,"Your order has been successfully processed. Here are the details:
+Unfortunately, the 5,000 sheets of A3 paper are unavailable. Thank you for your order!"
+4,2025-04-05,45848.19,4850.4,"Your order has been successfully placed for the following items:
+- 500 sheets of Cardstock at a total cost of $84.38
+- 250 sheets of A4 Paper at a total cost of $14.84
 
-- **Items Sold:**
-  - 200 sheets of Cardstock: $35.62
-  - 500 sheets of Standard copy paper: $22.50
-  - 100 Paper napkins: $2.38
+**Overall Total: $99.22**
 
-- **Total Price:** $60.50
-- **Delivery Date:** April 12, 2025
+Both items will be ready for delivery by **April 9, 2025**. 
 
-All requested items are confirmed for delivery. Thank you for your order!"
-10,2025-04-08,46368.19,4507.400000000001,"Your order has been successfully placed for:
-- 500 sheets of high-quality glossy paper at a total of $112.50
-- 300 sheets of sturdy cardstock at a total of $53.44
+Please note that all items requested are confirmed, and there are no unavailable items."
+5,2025-04-05,45900.380000000005,4820.4,"Thank you for your order! We have successfully processed your request for the following items to be delivered by April 15, 2025:
 
-The overall total for your order is $165.94, and the items are scheduled for delivery on April 12, 2025. 
+- **500 sheets of colored paper (8.5""x11"")** - $56.25
+- **300 sheets of cardstock in various colors** - $53.44
+- **200 rolls of decorative washi tape** - $47.50
 
-Unfortunately, there are no unavailable items for this order."
-11,2025-04-08,46378.31,4507.400000000001,"Your order for 300 sheets of Matte paper has been successfully finalized and will be available for pickup or delivery by April 12, 2025. The total cost for the order is $64.12 after a 5% discount. Unfortunately, the requested 500 sheets of A3 glossy paper are not available. Thank you for your order!"
-14,2025-04-09,46387.69,4507.400000000001,"Thank you for your order! We have successfully recorded the sale for 500 sheets of cardstock. The total cost for this order is $84.38 after applying a 10% discount. The delivery is scheduled to be ready by April 13, 2025, which is two days before your requested delivery date of April 15, 2025. 
+### **Order Total:** $157.19 
 
-Unfortunately, we cannot supply the 5,000 sheets of A4 paper and the 2,000 sheets of poster paper in various colors by the deadline. If you have any further needs or adjustments to your order, please let us know!"
-15,2025-04-12,46387.69,4507.400000000001,"Unfortunately, the requested paper supplies are unavailable for delivery by April 15, 2025. Here are the details:
-- **10,000 sheets of A4 white paper:** Only 250 gsm cardstock is listed, but it is out of stock, with delivery expected on April 19, 2025.
-- **5,000 sheets of A3 colored paper (assorted colors):** Not something we carry.
-- **250,000 sheets of cardboard for signage:** Unavailable; the 250 gsm cardstock also cannot be delivered until April 19, 2025.
+All items will be ready for delivery by their respective dates of April 5, 2025 (colored paper) and April 9, 2025 (cardstock and washi tape). Thank you for choosing us for your party supplies!"
+6,2025-04-06,45905.62999999999,4827.4,"Your order has been successfully placed for the following items:
+- 500 sheets of Construction paper: $39.38
+- 300 sheets of Standard copy paper: $14.25
+- 200 sheets of Cardstock: $35.62
 
-Please consider looking for alternative suppliers or adjusting your delivery timeline."
-16,2025-04-13,46506.44,4407.400000000001,"Your order has been successfully placed for 100 sheets of Large poster paper (24x36 inches). The total cost for this order is $118.75, and it will be delivered by April 13, 2025. Unfortunately, the requested A4 printer paper and colorful construction paper are unavailable by the deadline."
-17,2025-04-14,46562.69,4357.400000000001,"Thank you for your order. We have successfully finalized your request for delivery by April 14, 2025. 
+**Total Amount:** $89.25
+**Delivery Date:** April 10, 2025
 
-### Order Details:
-- 500 regular paper plates  (substituted for biodegradable): $56.25 (after a 10% discount)
+All items will be delivered on time. Thank you for your order!"
+7,2025-04-07,46328.0,4479.400000000001,"Thank you for your order. Here are the details:
 
-### Total: $56.25
+**Items Sold:**
+- 500 sheets of Glossy A4 paper - $112.50
+- 300 sheets of Poster boards (24"" x 36"") - $356.25
+- 200 sheets of Heavyweight cardstock - $35.62
 
-Unfortunately, the following items could not be supplied by the deadline:
+**Total Cost:** $504.37
+
+**Delivery Dates:**
+- Glossy A4 paper: April 11, 2025
+- Poster boards: April 7, 2025
+- Heavyweight cardstock: April 11, 2025
+
+Unfortunately, we could not supply the matte A3 paper as it is not part of our inventory. If you need any adjustments or alternatives, please let us know!"
+8,2025-04-07,46340.75,4505.400000000001,"Your order has been successfully placed for the following items:
+
+- 500 sheets of A4 glossy paper at $112.50, ready for delivery by April 11, 2025.
+- 1000 sheets of A4 matte paper at $191.25, ready for delivery by April 14, 2025.
+- 3000 sheets of A4 recycled paper at $255.00, ready for delivery by April 14, 2025.
+
+The total cost of your order is $558.75. 
+
+Unfortunately, we could not fulfill your request for 2000 sheets of A5 colored paper as it is not something we carry. Thank you for your order!"
+9,2025-04-07,46340.75,4505.400000000001,"Thank you for your order request. Unfortunately, we are unable to fulfill your order for the following paper supplies by the deadline of April 10, 2025:
+
+- **A4 White Printer Paper:** 200 sheets (no stock available, earliest delivery April 11, 2025)
+- **A3 Glossy Paper:** 100 sheets (not carried in stock)
+- **100% Recycled Kraft Paper Envelopes:** 50 packets (no stock available, earliest delivery April 11, 2025)
+
+Please consider alternative suppliers or products that can meet your requirement by the specified deadline."
+13,2025-04-08,46340.75,4505.400000000001,"I'm sorry, but both items you requested, 500 sheets of A4 printing paper and 200 sheets of cardstock, cannot be delivered by the requested date of April 10, 2025. The earliest delivery for both items is scheduled for April 12, 2025, which unfortunately misses your deadline."
+12,2025-04-08,46347.25,4507.400000000001,"Your order has been successfully placed for the following items, to be delivered by April 15, 2025:
+
+- 200 sheets of Cardstock at $35.62
+- 500 sheets of Standard copy paper at $22.50
+- 100 Paper napkins at $2.38
+
+**Total: $60.50** 
+
+Please note that all items will be ready for delivery by April 12, 2025."
+10,2025-04-08,46368.19,4507.400000000001,"Your order has been successfully placed for the following items:
+
+- 500 sheets of Glossy Paper: $112.50
+- 300 sheets of Cardstock: $53.44
+
+Total: $165.94
+
+Both items will be delivered by April 12, 2025. Please note that there are no items remaining from your request that could not be supplied."
+11,2025-04-08,46378.31,4507.400000000001,"Your order for 300 sheets of A4 matte paper has been successfully placed. The total cost is $64.12, and it will be ready for delivery by April 12, 2025. Unfortunately, the requested 500 sheets of A3 glossy paper are unavailable. Thank you for your order!"
+14,2025-04-09,46387.69,4507.400000000001,"Your order for 500 sheets of cardstock has been successfully processed and will be delivered by April 13, 2025. The total cost for this order is $84.38, which includes a bulk discount. Unfortunately, the requested 5,000 sheets of A4 paper and 2,000 sheets of poster paper in various colors are unavailable by the deadline."
+15,2025-04-12,46387.69,4507.400000000001,"Thank you for your order request. Unfortunately, none of the requested items can be delivered by April 15, 2025:
+
+1. **10,000 sheets of A4 white paper**: Not available until April 19, 2025.
+2. **250,000 sheets of cardboard for signage**: Not available until April 19, 2025.
+3. **5,000 sheets of A3 colored paper (assorted colors)**: This item is not carried.
+
+Please consider alternative options or contact suppliers for expedited shipping. Thank you for your understanding."
+16,2025-04-13,46506.44,4407.400000000001,"Your order has been successfully placed for the following items:
+- 100 sheets of large poster paper (24x36 inches) for $118.75 (after a 5% discount).
+
+The total cost for your order is $118.75. The poster paper will be delivered by April 13, 2025, which is in time for your assembly event on April 15, 2025.
+
+Unfortunately, the A4 printer paper and colorful construction paper are unavailable by the deadline. Please let us know if you need assistance with alternative options."
+17,2025-04-14,46562.69,4357.400000000001,"Your order has been successfully placed for the following item:
+- 500 biodegradable paper plates
+
+**Total Amount**: $56.25 (after a 10% discount)
+
+**Delivery Date**: April 14, 2025.
+
+Unfortunately, the following items are not available by the deadline:
 - 1000 sheets of A4 white printer paper
 - 500 sheets of A3 colored paper (assorted colors)
 - 2000 table napkins (white)
 - 1000 paper cups (biodegradable)
 
-If you need further assistance or alternatives for the unavailable items, please feel free to reach out."
-18,2025-04-14,46562.69,4357.400000000001,"I'm sorry, but all requested items are unavailable by the deadline of April 15, 2025:
+Thank you for your order!"
+18,2025-04-14,46562.69,4357.400000000001,"Unfortunately, none of the requested paper supplies can be delivered by your deadline of April 15, 2025. The details are as follows:
 
-1. **500 sheets of high-quality white cardstock**: Not available by the deadline.
-2. **1000 sheets of standard printing paper**: Not available by the deadline.
-3. **200 sheets of colored paper in assorted colors**: Not available by the deadline.
+- **500 sheets of high-quality white cardstock**: Not available; earliest delivery is April 18, 2025.
+- **1000 sheets of standard printing paper**: Not available; earliest delivery is April 18, 2025.
+- **200 sheets of colored paper in assorted colors**: Not available; earliest delivery is April 18, 2025.
 
-The earliest supplier delivery for all items is April 18, 2025, which is after your required date. Please consider adjusting your order or seeking alternative suppliers."
+Regrettably, this means we cannot supply any of the requested items in time for your ceremony."
 19,2025-04-15,46572.06999999999,4357.400000000001,"Dear Customer,
 
-Thank you for your order! We have successfully processed your request as follows:
+Thank you for your order. We have successfully finalized the following items for your upcoming exhibition:
 
-- 1000 sheets of Cardstock
-  - Line Total: $159.38 (after a 15% discount)
+- 1000 sheets of cardstock in assorted colors
 
-The cardstock will be ready for delivery on April 19, 2025.
+Total Cost: $159.38
+Delivery Date: April 19, 2025 (by your requested date of April 20, 2025)
 
-Unfortunately, we could not fulfill the other items you requested:
-- 2000 sheets of A4 glossy paper (not available by your deadline)
-- 1500 sheets of A3 matte paper (not carried)
+Unfortunately, we could not fulfill your request for:
+- 2000 sheets of A4 glossy paper (not available by the deadline)
+- 1500 sheets of A3 matte paper (not carried in our inventory)
 
-Thank you for your understanding!
+If you have any further questions or need assistance with alternative options for the unavailable items, please let us know.
 
-Best regards,
-Munder Difflin Paper Company"
+Thank you!"
 20,2025-04-17,46635.19999999998,4372.400000000001,"Your order has been successfully placed for the following items:
 
-- **Flyers:** 5,000 units at $796.88, ready by **April 24, 2025**.
-- **Poster Paper:** 2,000 units at $531.25, ready by **April 24, 2025**.
+- **5,000 Flyers**: Total Cost: $796.88, ready by April 24, 2025.
+- **2,000 Posters**: Total Cost: $531.25, ready by April 24, 2025.
 
-**Total amount:** $1,328.13.
+**Overall Total:** $1328.76.
 
-Please note that the requested tickets are currently unavailable by the deadline. If you need any further assistance, feel free to ask! Thank you!"
+Unfortunately, the **10,000 tickets** you requested are unavailable by the deadline. Please consider alternative options for sourcing tickets. Thank you!"
