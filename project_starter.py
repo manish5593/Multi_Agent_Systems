@@ -836,22 +836,54 @@ def _plan_fulfillment(item_name: str, quantity: int) -> Dict:
     return {"available": True, "reorder_quantity": reorder_quantity, "cost": cost, "ready_date": delivery_date}
 
 
+# Largest order size in each supplier lead-time tier of get_supplier_delivery_date
+# (<=10 units same day, <=100 one day, <=1000 four days), largest first.
+SUPPLIER_ORDER_SIZE_TIERS = [1000, 100, 10]
+
+
+def _plan_partial(item_name: str, quantity: int) -> Dict:
+    """
+    When the full quantity cannot be ready by the deadline, find the most that can: current
+    stock plus the largest affordable supplier order that still arrives in time, keeping the
+    minimum stock level as a buffer. Read-only.
+    """
+    order_date = _request_date()
+    deadline = _request_context["deadline"]
+    stock = _current_stock(item_name, order_date)
+    unit_cost = CATALOG[item_name]["unit_price"]
+    affordable = int(get_cash_balance(order_date) // unit_cost)
+    best_quantity, ready_date = min(stock, quantity), order_date
+    for tier in SUPPLIER_ORDER_SIZE_TIERS:
+        reorder_quantity = min(tier, affordable)
+        if reorder_quantity <= 0:
+            continue
+        delivery_date = get_supplier_delivery_date(order_date, reorder_quantity)
+        if delivery_date > deadline:
+            continue
+        with_reorder = min(quantity, stock + reorder_quantity - _min_stock_level(item_name))
+        if with_reorder > best_quantity:
+            best_quantity, ready_date = with_reorder, delivery_date
+        break  # tiers are largest first, so the first one that arrives in time supplies the most
+    return {"quantity": best_quantity, "ready_date": ready_date}
+
+
 # Tools for inventory agent
 
 @tool
 def check_availability(description: str, quantity: int) -> str:
     """
     Match one requested item to the catalog and check whether the quantity can be ready by the
-    customer's deadline, counting current stock and a possible supplier reorder. This only
-    checks; it does not buy anything.
+    customer's deadline, counting current stock and a possible supplier reorder. If only part of
+    it can be ready, reports how much ("available": "partial"). This only checks; it does not buy
+    anything.
 
     Args:
         description: The customer's wording for one requested item, copied verbatim, e.g. "colorful cardstock".
         quantity: The number of units the customer wants.
 
     Returns:
-        A JSON object with the matched catalog item_name and whether it is available by the deadline,
-        with its ready date or the reason not.
+        A JSON object with the matched catalog item_name, whether it is available by the deadline
+        (true, "partial" or false), the available_quantity, and its ready date or the reason not.
     """
     item_name = _best_catalog_match(description)
     if item_name is None:
@@ -862,8 +894,20 @@ def check_availability(description: str, quantity: int) -> str:
     result = {"description": description, "item_name": item_name, "quantity": quantity,
               "available": plan["available"]}
     if plan["available"]:
+        result["available_quantity"] = quantity
         result["ready_date"] = plan["ready_date"]
         _request_context["approved"][item_name] = quantity
+        return json.dumps(result)
+
+    partial = _plan_partial(item_name, quantity)
+    if partial["quantity"] > 0:
+        result.update({
+            "available": "partial",
+            "available_quantity": partial["quantity"],
+            "ready_date": partial["ready_date"],
+            "reason": f"Only {partial['quantity']} of {quantity} can be ready by the deadline. {plan['reason']}",
+        })
+        _request_context["approved"][item_name] = partial["quantity"]
     else:
         result["reason"] = plan["reason"]
     return json.dumps(result)
@@ -970,7 +1014,8 @@ inventory_agent = ToolCallingAgent(
         "copied verbatim (e.g. 'colorful cardstock', not a catalog name you chose) and the full quantity. "
         "The tool picks the catalog item itself. Never check alternatives, substitutes or partial quantities. "
         "In your final answer, list every item as: customer description | catalog item_name from the tool "
-        "(or 'not carried') | quantity | available (yes/no) | ready date or reason."
+        "(or 'not carried') | requested quantity | available (yes/partial/no) | available_quantity | "
+        "ready date | reason if not fully available."
     ),
     max_steps=15,
     max_tool_threads=1,  # tools write to SQLite; run them one at a time
@@ -1023,13 +1068,16 @@ orchestrator = ToolCallingAgent(
         "2. Send the full item list to inventory_agent, once, in the customer's own wording. It matches "
         "each line to at most one catalog item: never ask for similar or substitute items, and never split "
         "a quantity across products. If a line has no match or is unavailable, it is simply not supplied.\n"
-        "3. Send only the available items to quoting_agent, using the exact catalog item_name values "
-        "reported by inventory_agent (not the customer's wording) and the quantities.\n"
-        "4. Send the quoted lines (exact item names and quantities) to sales_agent. Always sell every "
-        "available item, even if other items are unavailable; never ask the customer to confirm first.\n"
+        "3. Send only the available and partially available items to quoting_agent, using the exact "
+        "catalog item_name values reported by inventory_agent and each item's available_quantity "
+        "(for partial items this is less than requested).\n"
+        "4. Send the quoted lines (exact item names and available quantities) to sales_agent. Always sell "
+        "every available and partially available item, even if other items are unavailable; never ask "
+        "the customer to confirm first.\n"
         "5. Write the final answer to the customer: the items sold, named by their catalog item_name, with quantities, the line totals and "
         "discounts from quoting_agent and their sum as the total, the delivery date, and which items you "
-        "cannot supply. Only list items whose sale sales_agent recorded. "
+        "cannot supply. For partially supplied items, say how many of the requested quantity will be "
+        "supplied and that the rest is unavailable by the deadline. Only list items whose sale sales_agent recorded. "
         "Be polite and concise. Never mention stock levels, restock costs, cash, funds, suppliers, "
         "internal agents or tool errors; for unavailable items just say they are unavailable by the "
         "deadline or not something we carry."

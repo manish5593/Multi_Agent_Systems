@@ -68,7 +68,8 @@
   <text x="56" y="538" class="small">matches wording to one item (word overlap,</text>
   <text x="56" y="553" class="small">main noun, aliases; no A3/A5); read-only check</text>
   <text x="56" y="568" class="small">of stock, supplier lead time and cash;</text>
-  <text x="56" y="583" class="small">records an approval for item + quantity</text>
+  <text x="56" y="583" class="small">approves the full quantity, or the part that</text>
+  <text x="56" y="598" class="small">can be ready by the deadline (partial)</text>
 
   <rect x="390" y="430" width="320" height="200" rx="10" fill="#eff6ff" stroke="#2563eb" stroke-width="1.5"/>
   <text x="406" y="457" class="box-title">Quoting agent</text>

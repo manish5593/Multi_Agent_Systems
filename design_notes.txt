@@ -57,9 +57,14 @@ check_availability(description, quantity)                     [read-only]
   If current stock covers the quantity, the item is ready on the request date.
   Otherwise it plans a supplier reorder of (shortfall + minimum stock level),
   uses get_supplier_delivery_date for the lead time, and checks that the
-  delivery arrives by the deadline and that the company can afford it. It
-  writes nothing to the database, but records an approval for the matched
-  item and quantity, and remembers which item the description matched.
+  delivery arrives by the deadline and that the company can afford it.
+  If the full quantity cannot be ready in time, it reports a partial
+  quantity: current stock plus the largest affordable supplier order that
+  still arrives by the deadline (supplier lead time depends on order size:
+  up to 10 units same day, 100 one day, 1,000 four days, more seven days),
+  keeping the minimum stock level as a buffer. It writes nothing to the
+  database, but records an approval for the matched item and the full or
+  partial quantity, and remembers which item the description matched.
 
 Catalog matching (_best_catalog_match)
   Deterministic; no agent chooses between candidates.
@@ -173,7 +178,16 @@ i) A 25% markup over the supplier price.
    profitable; 25% leaves a margin of at least 6.25%. It is MARKUP_RATE in
    project_starter.py.
 
-j) Starter code fixes.
+j) Partial fulfillment.
+   Originally a line was declined outright if the full quantity could not be
+   ready by the deadline, even when most of it was in stock or a smaller
+   supplier order would arrive in time. Now the available part is approved,
+   quoted (with the discount tier for that quantity) and sold, and the reply
+   tells the customer how many of the requested units will be supplied. The
+   remainder is declined, not backordered, because the customer needs the
+   items by the deadline.
+
+k) Starter code fixes.
    run_test_scenarios() called init_database() without its required argument
    and printed an undefined `response`; both are fixed. One failed request is
    caught and logged so the run continues.
@@ -182,45 +196,30 @@ j) Starter code fixes.
 5. TEST RESULTS (test_results.csv)
 ----------------------------------
 All 20 requests in quote_requests_sample.csv were processed without crashes,
-and the database passed SQLite's integrity check afterwards.
+and the database passed SQLite's integrity check afterwards. See report.md
+for a per-request table.
 
-  Requests with at least one sale:   16 of 20
-  Requests with no sale:             4 (9, 13, 15, 18). Nothing requested
-                                     could be ready by the deadline or was
-                                     in the catalog.
+  Requests with at least one sale:   20 of 20
+  Requested lines checked:           60
+    filled in full:                  32
+    filled in part:                  12 (e.g. request 14: 865 of 5,000
+                                     sheets of A4 paper by the deadline)
+    nothing ready by the deadline:   5
+    not carried:                     11 (mostly A3/A5 paper)
   Sales priced exactly at cost x 1.25
-  less the bulk discount:            33 of 33
+  less the bulk discount:            44 of 44
   Sales below cost:                  0
   Stock orders without a sale:       0
   Items with negative stock:         0
+  Quotes/sales rejected as not
+  approved:                          0
   Replies revealing stock levels,
   costs, markup or cash:             0
   Replies asking the customer to
   confirm instead of selling:        0
-  Quotes/sales rejected as not
-  approved:                          0 (the previous run had 13, all
-                                     near-miss names such as "Washi tape";
-                                     these now resolve via the matcher).
-  Approved items left unsold:        0
-  Colorful cardstock / colorful
-  construction paper:                sold as Cardstock (request 12, $35.62)
-                                     and Construction paper (request 6,
-                                     $39.38).
 
   Starting position:  cash $45,059.70, inventory $4,940.30, total $50,000.00
-  Final position:     cash $46,635.20, inventory $4,372.40, total $51,007.60
-
-Typical outcomes:
-  - Fulfilled from stock with bulk discount (request 1: 200 glossy, 100
-    cardstock, 100 colored paper for $77.19).
-  - Fulfilled via supplier reorder ready by the deadline, with reams
-    converted (request 3: 10,000 sheets of A4 paper for $531.25 and 500 reams
-    = 250,000 sheets of Standard copy paper for $10,625.00, both ready
-    2025-04-11; A3 paper declined as not carried).
-  - Partially fulfilled (request 14: 500 sheets of cardstock sold for $84.38;
-    A4 and poster paper could not arrive by the deadline).
-  - Declined because the supplier cannot deliver before the deadline
-    (request 13: April 10 deadline, earliest delivery April 12).
+  Final position:     cash $46,730.70, inventory $4,333.85, total $51,064.55
 
 
 6. KNOWN LIMITATIONS AND POSSIBLE IMPROVEMENTS
@@ -234,6 +233,10 @@ Typical outcomes:
   sees the paraphrase.
 - If two requested lines match the same catalog item, the second check
   replaces the first approval.
+- Partial sales have no minimum: request 15 sold 135 of 10,000 sheets. A
+  threshold (e.g. at least half the request) may suit customers better.
+- The customer reply does not always state a partial shortfall (request 15
+  listed the 135 sheets without saying 10,000 were requested).
 - If the sales agent tries a different item than the one approved, the
   guard blocks it; the agent usually retries with the approved item, but in
   one earlier run it did not and an available item went unsold.
