@@ -1099,7 +1099,21 @@ def call_multi_agent_system(request: str, request_date: str) -> str:
     _request_context["approved"] = {}
     _request_context["matched"] = {}
     try:
-        return str(orchestrator.run(request, reset=True))
+        response = str(orchestrator.run(request, reset=True))
+        # Approvals are removed as items are sold, so any left over are available lines the
+        # orchestrator skipped. Send it back once, in the same conversation, to sell them.
+        unsold = _request_context["approved"]
+        if unsold:
+            lines = ", ".join(f"{qty} x {name}" for name, qty in unsold.items())
+            print(f"UNSOLD APPROVED LINES: {lines}; asking the orchestrator to sell them")
+            response = str(orchestrator.run(
+                f"These lines were confirmed available but were not sold: {lines}. Send them to "
+                f"quoting_agent and then sales_agent with exactly these item names and quantities. Then "
+                f"write the complete final reply to the customer again, covering every item sold in this "
+                f"request and every item that could not be supplied.",
+                reset=False,
+            ))
+        return response
     finally:
         _request_context["date"] = None
         _request_context["deadline"] = None

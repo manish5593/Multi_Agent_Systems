@@ -120,11 +120,13 @@
   <text x="908" y="668" class="small">read + write</text>
 
   <!-- Output -->
-  <rect x="40" y="245" width="240" height="88" rx="8" fill="#f3f4f6" stroke="#9ca3af"/>
+  <rect x="40" y="245" width="240" height="126" rx="8" fill="#f3f4f6" stroke="#9ca3af"/>
   <text x="56" y="270" class="box-title">Customer reply</text>
   <text x="56" y="290" class="box-text">Logged with cash balance and</text>
   <text x="56" y="308" class="box-text">inventory value in</text>
   <text x="56" y="326" class="box-text">test_results.csv</text>
+  <text x="56" y="346" class="small">If an approved line is unsold, Python</text>
+  <text x="56" y="360" class="small">sends the orchestrator back once</text>
   <path d="M330,289 L284,289" class="flow"/>
   <text x="286" y="279" class="label">④</text>
 </svg>

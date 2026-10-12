@@ -191,7 +191,16 @@ j) Partial fulfillment.
    are declined: without a minimum, one run sold 135 of 10,000 sheets, which
    is unlikely to help a customer planning an event.
 
-k) Starter code fixes.
+k) A follow-up for unsold approved lines.
+   Approvals are removed as items are sold, so any approval left when the
+   orchestrator finishes is an available line it skipped. In one run the
+   orchestrator declined a whole order because two of its three lines were
+   below the 50% minimum, leaving an approved line unsold. Now
+   call_multi_agent_system() checks for leftover approvals and, once, sends
+   the orchestrator back (same conversation) to quote and sell them and
+   rewrite the reply.
+
+l) Starter code fixes.
    run_test_scenarios() called init_database() without its required argument
    and printed an undefined `response`; both are fixed. One failed request is
    caught and logged so the run continues.
@@ -203,27 +212,26 @@ All 20 requests in quote_requests_sample.csv were processed without crashes,
 and the database passed SQLite's integrity check afterwards. See report.md
 for a per-request table.
 
-  Requests with at least one sale:   18 of 20
+  Requests with at least one sale:   19 of 20
   Requested lines checked:           60
     filled in full:                  33
-    filled in part:                  5 (e.g. request 14: 1,000 of 2,000
-                                     sheets of poster paper), plus 1
-                                     approved but not sold (request 18)
+    filled in part:                  6 (e.g. request 14: 1,000 of 2,000
+                                     sheets of poster paper)
     under 50% ready by deadline:     5 (declined)
     nothing ready by the deadline:   5
     not carried:                     11 (mostly A3/A5 paper)
+  Approved lines left unsold:        0 (the unsold-line follow-up was not
+                                     triggered in this run)
   Sales priced exactly at cost x 1.25
-  less the bulk discount:            38 of 38
+  less the bulk discount:            39 of 39
   Sales below cost:                  0
   Stock orders without a sale:       0
   Items with negative stock:         0
-  Duplicate sales blocked by the
-  approval guard:                    4 (request 16)
   Replies revealing stock levels,
   costs, markup or cash:             0
 
   Starting position:  cash $45,059.70, inventory $4,940.30, total $50,000.00
-  Final position:     cash $46,683.81, inventory $4,358.65, total $51,042.46
+  Final position:     cash $46,706.13, inventory $4,339.85, total $51,045.98
 
 
 6. KNOWN LIMITATIONS AND POSSIBLE IMPROVEMENTS
@@ -237,13 +245,11 @@ for a per-request table.
   sees the paraphrase.
 - If two requested lines match the same catalog item, the second check
   replaces the first approval.
-- The orchestrator can skip an approved line: in request 18 it declined the
-  whole order because two lines were below the 50% minimum, leaving an
-  approved 188 of 200 sheets of colored paper unsold. A Python check after
-  each request that re-prompts the orchestrator about unsold approvals
-  would close this gap.
-- Reply wording can contradict what happened: request 16's reply asked the
-  customer whether to proceed although the sale was already recorded.
+- The follow-up for unsold approved lines runs once; if the orchestrator
+  skips a line again, it stays unsold.
+- Reply wording can contradict what happened: in an earlier run, request
+  16's reply asked the customer whether to proceed although the sale was
+  already recorded.
 - If the sales agent tries a different item than the one approved, the
   guard blocks it; the agent usually retries with the approved item, but in
   one earlier run it did not and an available item went unsold.
