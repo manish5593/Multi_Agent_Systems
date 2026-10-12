@@ -63,6 +63,9 @@ check_availability(description, quantity)                     [read-only]
 
 Catalog matching (_best_catalog_match)
   Deterministic; no agent chooses between candidates.
+  - A leading order quantity ("250,000 sheets of", "2000") is removed first,
+    so its digits cannot match items like "250 gsm cardstock". Spec numbers
+    followed by gsm or lb are kept.
   - A-series sizes the catalog does not stock (A3, A5) match nothing.
   - Aliases for wording unlike any catalog name ("printer paper" / "copy
     paper" -> Standard copy paper, "poster board" -> Large poster paper

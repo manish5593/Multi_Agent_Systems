@@ -737,6 +737,19 @@ def _match_words(text: str) -> List[str]:
     return [w[:-1] if len(w) > 3 and w.endswith("s") and not w.endswith("ss") else w for w in words]
 
 
+# A leading order quantity, e.g. "250,000 sheets of" or "2000", but not a spec like "250 gsm" or "100 lb"
+LEADING_QUANTITY_PATTERN = re.compile(
+    r"^\s*\d[\d,]*(?![\d,])(?!\s*(?:gsm|lb)\b)\s*"
+    r"(?:(?:sheets?|rolls?|reams?|packets?|packs?|boxes?|units?|pieces?|pads?|pcs)\b)?\s*(?:of\b)?\s*",
+    re.IGNORECASE,
+)
+
+
+def _strip_quantity(description: str) -> str:
+    """Remove a leading order quantity so its digits cannot match items like "250 gsm cardstock"."""
+    return LEADING_QUANTITY_PATTERN.sub("", description, count=1)
+
+
 def _normalize_description(description: str) -> str:
     return " ".join(_match_words(description))
 
@@ -752,6 +765,7 @@ def _best_catalog_match(description: str) -> Union[str, None]:
     exact = _resolve_item_name(description)
     if exact:
         return exact
+    description = _strip_quantity(description)
     query_words = set(_match_words(description))
     # Main noun: last word, ignoring parenthetical details like "(white)"
     head_words = _match_words(re.sub(r"\([^)]*\)", " ", description))
