@@ -589,7 +589,69 @@ def search_quote_history(search_terms: List[str], limit: int = 5) -> List[Dict]:
 ########################
 
 
+import difflib
+import json
+from smolagents import OpenAIServerModel, ToolCallingAgent, tool
+
 # Set up and load your env parameters and instantiate your model.
+dotenv.load_dotenv()
+
+model = OpenAIServerModel(
+    model_id=os.getenv("OPENAI_MODEL_ID", "gpt-4o-mini"),
+    api_base="https://openai.vocareum.com/v1",
+    api_key=os.getenv("UDACITY_OPENAI_API_KEY"),
+)
+
+# Business rules shared by the tools
+CATALOG = {item["item_name"]: item for item in paper_supplies}
+DEFAULT_MIN_STOCK_LEVEL = 100
+# (minimum quantity, discount rate), checked from largest tier down
+BULK_DISCOUNT_TIERS = [(1000, 0.15), (500, 0.10), (100, 0.05), (0, 0.0)]
+
+
+def _normalize_date(date_str: str) -> str:
+    """Reduce any ISO date or datetime string to YYYY-MM-DD."""
+    return str(date_str).split("T")[0].strip()
+
+
+def _current_stock(item_name: str, as_of_date: str) -> int:
+    return int(get_stock_level(item_name, as_of_date)["current_stock"].iloc[0])
+
+
+def _min_stock_level(item_name: str) -> int:
+    inventory_df = pd.read_sql(
+        "SELECT min_stock_level FROM inventory WHERE item_name = :item_name",
+        db_engine,
+        params={"item_name": item_name},
+    )
+    if inventory_df.empty:
+        return DEFAULT_MIN_STOCK_LEVEL
+    return int(inventory_df["min_stock_level"].iloc[0])
+
+
+def _ensure_in_inventory_table(item_name: str) -> None:
+    """Track newly stocked catalog items so the financial report values them."""
+    existing = pd.read_sql(
+        "SELECT item_name FROM inventory WHERE item_name = :item_name",
+        db_engine,
+        params={"item_name": item_name},
+    )
+    if existing.empty:
+        item = CATALOG[item_name]
+        pd.DataFrame([{
+            "item_name": item_name,
+            "category": item["category"],
+            "unit_price": item["unit_price"],
+            "current_stock": 0,
+            "min_stock_level": DEFAULT_MIN_STOCK_LEVEL,
+        }]).to_sql("inventory", db_engine, if_exists="append", index=False)
+
+
+def _bulk_discount_rate(quantity: int) -> float:
+    for min_quantity, rate in BULK_DISCOUNT_TIERS:
+        if quantity >= min_quantity:
+            return rate
+    return 0.0
 
 
 """Set up tools for your agents to use, these should be methods that combine the database functions above
@@ -598,14 +660,281 @@ def search_quote_history(search_terms: List[str], limit: int = 5) -> List[Dict]:
 
 # Tools for inventory agent
 
+@tool
+def find_catalog_items(description: str) -> str:
+    """
+    Find the catalog items that best match a customer's description of a product.
+    Always use this before any other tool so that exact catalog item names are used.
+
+    Args:
+        description: The customer's wording for the item, e.g. "A4 glossy paper" or "heavy cardstock".
+
+    Returns:
+        A JSON list of up to 5 candidate items with their exact item_name, category and unit_price,
+        or a message saying nothing in the catalog matches.
+    """
+    query = description.lower()
+    query_words = set(query.replace("-", " ").split())
+    scored = []
+    for name, item in CATALOG.items():
+        name_lower = name.lower()
+        name_words = set(name_lower.replace("-", " ").replace("(", " ").replace(")", " ").split())
+        overlap = len(query_words & name_words) / max(len(name_words), 1)
+        similarity = difflib.SequenceMatcher(None, query, name_lower).ratio()
+        score = overlap + similarity
+        if overlap > 0 or similarity >= 0.5:
+            scored.append((score, item))
+    scored.sort(key=lambda pair: pair[0], reverse=True)
+    if not scored:
+        return f"No catalog item matches '{description}'. We do not sell this item."
+    return json.dumps([item for _, item in scored[:5]])
+
+
+@tool
+def check_stock(item_name: str, as_of_date: str) -> str:
+    """
+    Check how many units of a catalog item are in stock on a given date.
+
+    Args:
+        item_name: The exact catalog item name, as returned by find_catalog_items.
+        as_of_date: The date to check, in YYYY-MM-DD format.
+
+    Returns:
+        A JSON object with the item's current stock and minimum stock level.
+    """
+    if item_name not in CATALOG:
+        return f"ERROR: '{item_name}' is not an exact catalog item name. Use find_catalog_items first."
+    as_of_date = _normalize_date(as_of_date)
+    return json.dumps({
+        "item_name": item_name,
+        "as_of_date": as_of_date,
+        "current_stock": _current_stock(item_name, as_of_date),
+        "min_stock_level": _min_stock_level(item_name),
+    })
+
+
+@tool
+def restock_item(item_name: str, quantity_needed: int, order_date: str, deadline: str) -> str:
+    """
+    Make sure enough stock of an item will be available for a customer order, buying from the
+    supplier if necessary. Orders enough to cover the shortfall plus the item's minimum stock level.
+    Refuses if the supplier cannot deliver by the deadline or the company cannot afford the purchase.
+
+    Args:
+        item_name: The exact catalog item name, as returned by find_catalog_items.
+        quantity_needed: The number of units the customer wants.
+        order_date: The date of the customer request, in YYYY-MM-DD format.
+        deadline: The date the customer needs the items by, in YYYY-MM-DD format.
+
+    Returns:
+        A message saying whether the item is available by the deadline, and when.
+    """
+    if item_name not in CATALOG:
+        return f"ERROR: '{item_name}' is not an exact catalog item name. Use find_catalog_items first."
+    order_date = _normalize_date(order_date)
+    deadline = _normalize_date(deadline)
+
+    stock = _current_stock(item_name, order_date)
+    if stock >= quantity_needed:
+        return json.dumps({
+            "item_name": item_name,
+            "available": True,
+            "restocked_units": 0,
+            "ready_date": order_date,
+            "note": f"{stock} units already in stock.",
+        })
+
+    reorder_quantity = quantity_needed - stock + _min_stock_level(item_name)
+    delivery_date = get_supplier_delivery_date(order_date, reorder_quantity)
+    if delivery_date > deadline:
+        return json.dumps({
+            "item_name": item_name,
+            "available": False,
+            "reason": f"Only {stock} units in stock and the supplier cannot deliver until {delivery_date}, "
+                      f"after the {deadline} deadline.",
+        })
+
+    cost = reorder_quantity * CATALOG[item_name]["unit_price"]
+    cash = get_cash_balance(order_date)
+    if cost > cash:
+        return json.dumps({
+            "item_name": item_name,
+            "available": False,
+            "reason": f"Restocking would cost ${cost:.2f} but only ${cash:.2f} cash is available.",
+        })
+
+    _ensure_in_inventory_table(item_name)
+    create_transaction(item_name, "stock_orders", reorder_quantity, cost, order_date)
+    return json.dumps({
+        "item_name": item_name,
+        "available": True,
+        "restocked_units": reorder_quantity,
+        "restock_cost": round(cost, 2),
+        "ready_date": delivery_date,
+    })
+
 
 # Tools for quoting agent
+
+@tool
+def search_past_quotes(search_terms: list) -> str:
+    """
+    Search historical quotes for similar past requests, to keep pricing and explanations consistent.
+
+    Args:
+        search_terms: A list of keywords such as item names or event types, e.g. ["cardstock", "ceremony"].
+
+    Returns:
+        A JSON list of up to 5 matching past quotes with their totals and explanations.
+    """
+    return json.dumps(search_quote_history([str(term) for term in search_terms], limit=5), default=str)
+
+
+@tool
+def price_line_item(item_name: str, quantity: int) -> str:
+    """
+    Calculate the price of one line of a quote, including the bulk discount.
+    Discount tiers: 100+ units 5%, 500+ units 10%, 1000+ units 15%.
+
+    Args:
+        item_name: The exact catalog item name, as returned by find_catalog_items.
+        quantity: The number of units being quoted.
+
+    Returns:
+        A JSON object with unit price, discount rate, discounted unit price and line total.
+    """
+    if item_name not in CATALOG:
+        return f"ERROR: '{item_name}' is not an exact catalog item name. Use find_catalog_items first."
+    unit_price = CATALOG[item_name]["unit_price"]
+    discount_rate = _bulk_discount_rate(quantity)
+    discounted_unit_price = unit_price * (1 - discount_rate)
+    return json.dumps({
+        "item_name": item_name,
+        "quantity": quantity,
+        "unit_price": unit_price,
+        "discount_rate": discount_rate,
+        "discounted_unit_price": round(discounted_unit_price, 4),
+        "line_total": round(discounted_unit_price * quantity, 2),
+    })
 
 
 # Tools for ordering agent
 
+@tool
+def record_sale(item_name: str, quantity: int, line_total: float, sale_date: str) -> str:
+    """
+    Record a confirmed sale of one line item. Refuses if there is not enough stock.
+
+    Args:
+        item_name: The exact catalog item name.
+        quantity: The number of units sold.
+        line_total: The total price charged for this line, from the quote.
+        sale_date: The date of the customer request, in YYYY-MM-DD format.
+
+    Returns:
+        A confirmation with the transaction ID, or an error message.
+    """
+    if item_name not in CATALOG:
+        return f"ERROR: '{item_name}' is not an exact catalog item name."
+    sale_date = _normalize_date(sale_date)
+    stock = _current_stock(item_name, sale_date)
+    if stock < quantity:
+        return f"ERROR: only {stock} units of {item_name} in stock; cannot sell {quantity}."
+    transaction_id = create_transaction(item_name, "sales", quantity, line_total, sale_date)
+    return f"Sale recorded (transaction {transaction_id}): {quantity} x {item_name} for ${line_total:.2f}."
+
+
+@tool
+def check_cash_balance(as_of_date: str) -> str:
+    """
+    Get the company's cash balance on a given date.
+
+    Args:
+        as_of_date: The date to check, in YYYY-MM-DD format.
+
+    Returns:
+        The cash balance in dollars.
+    """
+    return f"${get_cash_balance(_normalize_date(as_of_date)):.2f}"
+
 
 # Set up your agents and create an orchestration agent that will manage them.
+
+inventory_agent = ToolCallingAgent(
+    tools=[find_catalog_items, check_stock, restock_item],
+    model=model,
+    name="inventory_agent",
+    description=(
+        "Maps the customer's item descriptions to exact catalog item names, checks stock, and restocks from "
+        "the supplier when needed. Give it the full list of requested items with quantities, the request "
+        "date and the delivery deadline. It reports which items can be supplied by the deadline."
+    ),
+    instructions=(
+        "For each requested item: call find_catalog_items and pick the single best exact match. "
+        "If nothing is a reasonable match (e.g. balloons, A3 paper), mark it as not sold. "
+        "Convert reams to sheets (1 ream = 500 sheets). "
+        "For each matched item call restock_item with the quantity, request date and deadline. "
+        "Finish with a list of: requested description, exact catalog item_name, quantity, available "
+        "(yes/no), ready date or reason."
+    ),
+    max_steps=15,
+)
+
+quoting_agent = ToolCallingAgent(
+    tools=[search_past_quotes, price_line_item],
+    model=model,
+    name="quoting_agent",
+    description=(
+        "Prices a list of available items (exact catalog names and quantities) with bulk discounts, using "
+        "past quotes for context. Returns line totals and a quote total."
+    ),
+    instructions=(
+        "Call price_line_item for every item you are given; never invent prices. "
+        "Optionally call search_past_quotes once for context on similar requests. "
+        "Finish with each item's quantity, discounted unit price, discount rate and line total, "
+        "plus the overall total."
+    ),
+    max_steps=12,
+)
+
+sales_agent = ToolCallingAgent(
+    tools=[record_sale, check_cash_balance],
+    model=model,
+    name="sales_agent",
+    description=(
+        "Finalizes an order by recording a sale for each quoted line item. Give it the exact catalog item "
+        "names, quantities, line totals and the request date."
+    ),
+    instructions=(
+        "Call record_sale once per line item using the exact line totals you were given. "
+        "Finish with which sales succeeded and which failed."
+    ),
+    max_steps=12,
+)
+
+orchestrator = ToolCallingAgent(
+    tools=[],
+    model=model,
+    managed_agents=[inventory_agent, quoting_agent, sales_agent],
+    name="orchestrator",
+    instructions=(
+        "You are the customer service front desk of Munder Difflin Paper Company. For each request:\n"
+        "1. Extract every requested item with its quantity, the request date and the delivery deadline "
+        "(YYYY-MM-DD). If no deadline is given, use 14 days after the request date.\n"
+        "2. Send the full item list, request date and deadline to inventory_agent.\n"
+        "3. Send only the available items (exact catalog names and quantities) to quoting_agent.\n"
+        "4. Send the quoted lines and request date to sales_agent to record the sales.\n"
+        "5. Write the final answer to the customer: the items you will supply with quantities, prices, "
+        "discounts and total, the delivery date, and which items you cannot supply and why. "
+        "Be polite and concise. Do not reveal internal details such as cash balance, supplier costs, "
+        "stock levels or tool errors."
+    ),
+    max_steps=10,
+)
+
+
+def call_multi_agent_system(request: str) -> str:
+    return str(orchestrator.run(request, reset=True))
 
 
 # Run your test scenarios by writing them here. Make sure to keep track of them.
@@ -613,7 +942,7 @@ def search_quote_history(search_terms: List[str], limit: int = 5) -> List[Dict]:
 def run_test_scenarios():
     
     print("Initializing Database...")
-    init_database()
+    init_database(db_engine)
     try:
         quote_requests_sample = pd.read_csv("quote_requests_sample.csv")
         quote_requests_sample["request_date"] = pd.to_datetime(
@@ -660,7 +989,11 @@ def run_test_scenarios():
         ############
         ############
 
-        # response = call_your_multi_agent_system(request_with_date)
+        try:
+            response = call_multi_agent_system(request_with_date)
+        except Exception as e:
+            print(f"ERROR: agent system failed on request {idx+1}: {e}")
+            response = "Sorry, we could not process your request right now. Please try again later."
 
         # Update state
         report = generate_financial_report(request_date)
