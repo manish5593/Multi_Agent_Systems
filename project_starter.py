@@ -599,6 +599,7 @@ from fulfillment import StockPosition, meets_partial_minimum, plan_fulfillment, 
 from matching import CatalogMatcher, normalize_description
 from pricing import price_line
 from reply_validation import MAX_REPLY_REWRITES, reply_problems, reply_requirements
+from validate_results import check_results, report as report_result_checks
 
 # Set up and load your env parameters and instantiate your model.
 dotenv.load_dotenv()
@@ -1056,6 +1057,7 @@ def run_test_scenarios():
     report = generate_financial_report(initial_date)
     current_cash = report["cash_balance"]
     current_inventory = report["inventory_value"]
+    starting_cash, starting_inventory = current_cash, current_inventory
 
     ############
     ############
@@ -1122,6 +1124,9 @@ def run_test_scenarios():
 
     # Save results
     pd.DataFrame(results).to_csv("test_results.csv", index=False)
+
+    # Check the saved results against properties every run must satisfy
+    report_result_checks(check_results("test_results.csv", starting_cash, starting_inventory), "test_results.csv")
     return results
 
 

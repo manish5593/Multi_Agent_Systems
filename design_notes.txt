@@ -30,6 +30,9 @@ CODE STRUCTURE
   fulfillment.py       Full and partial fulfillment planning, and the 50%
                        partial-order minimum.
   reply_validation.py  Checks the customer reply against recorded sales.
+  validate_results.py  Automated checks on test_results.csv (see below).
+  test_validate_results.py
+                       Unit tests showing each check catches its problem.
 
 The four modules are pure logic: they don't touch the database or the
 request state, so they can be tested on their own. project_starter.py
@@ -330,5 +333,25 @@ for a per-request table.
   python project_starter.py
 
 This creates munder_difflin.db, processes the 20 sample requests, prints a
-final financial report, and writes test_results.csv. A full run takes about
-15-25 minutes.
+final financial report, writes test_results.csv and then checks it (below).
+A full run takes about 15-25 minutes.
+
+Automated result checks:
+  python validate_results.py            # exit status 1 if any check fails
+  python -m unittest test_validate_results
+
+validate_results.py checks properties every run must satisfy, not one
+run's exact wording:
+  - 20 rows, unique request IDs, in date order
+  - no request failed (no fallback "could not process" reply)
+  - no response contains internal details (INTERNAL_DETAIL_PATTERN)
+  - every row includes a sale (cash changed and a price is stated), a
+    reason for non-fulfillment, or both
+  - a sale's reply doesn't ask the customer to confirm; a reply with no
+    sale doesn't claim the order was placed
+  - cash and inventory are never negative, and total assets never fall
+    from one request to the next (every sale is priced above cost)
+Run against every earlier test_results.csv in the git history, it flags the
+known problems (pre-markup runs losing money, request 16 asking to proceed,
+leaked "865 sheets were available" / "minimum for a partial order") and
+passes every run since the reply check was added.

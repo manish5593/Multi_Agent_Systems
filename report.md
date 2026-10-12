@@ -91,6 +91,10 @@ Results are in [`test_results.csv`](test_results.csv), from a full run of `quote
 | 19 | 04-15 | Glossy paper 1,000 of 2,000, Cardstock 1,000 | $371.88 | A3 matte paper (not carried) |
 | 20 | 04-17 | Flyers 5,000, Poster paper 2,000 | $1,328.13 | tickets (not carried) |
 
+### Automated checks
+
+`validate_results.py` checks `test_results.csv` automatically, and `run_test_scenarios()` runs it after every test run. It checks properties every run must satisfy rather than one run's exact wording: no failed requests, no internal details in any response (`INTERNAL_DETAIL_PATTERN`), every row includes a sale or a reason for non-fulfillment (or both), replies are consistent with the books (no "please confirm" after a sale, no "order placed" without one), cash and inventory never go negative, and total assets never fall between requests. The current results pass every check. Run against every earlier `test_results.csv` in the git history, it catches the problems found by hand during development (money-losing sales before the markup, a reply asking to proceed after the sale, leaked stock counts) and passes every run since the reply check was added. `test_validate_results.py` has a unit test for each check, confirming it catches a deliberately broken copy of the results.
+
 ### Strengths
 
 - **Prices and the books are correct by construction.** Prices come from one function shared by quoting and sales. Dates come from Python. Stock is bought only inside `record_sale`, for items actually sold. Every sale matched the expected price, and no stock order lacks a matching sale.
@@ -144,4 +148,4 @@ echo "UDACITY_OPENAI_API_KEY=<your key>" > .env
 python project_starter.py
 ```
 
-Run it from the project folder: `project_starter.py` imports `matching.py`, `pricing.py`, `fulfillment.py` and `reply_validation.py` from the same folder. The run takes about 15–25 minutes. It writes `test_results.csv` and prints the final financial report.
+After the run, the results are checked automatically; you can also run `python validate_results.py` and `python -m unittest test_validate_results` on their own. Run it from the project folder: `project_starter.py` imports `matching.py`, `pricing.py`, `fulfillment.py` and `reply_validation.py` from the same folder. The run takes about 15–25 minutes. It writes `test_results.csv` and prints the final financial report.
