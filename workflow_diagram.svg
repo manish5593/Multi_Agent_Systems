@@ -70,6 +70,7 @@
   <text x="56" y="568" class="small">of stock, supplier lead time and cash;</text>
   <text x="56" y="583" class="small">approves the full quantity, or the part that</text>
   <text x="56" y="598" class="small">can be ready by the deadline (partial)</text>
+  <text x="56" y="618" class="tool">list_inventory</text>
 
   <rect x="390" y="430" width="320" height="200" rx="10" fill="#eff6ff" stroke="#2563eb" stroke-width="1.5"/>
   <text x="406" y="457" class="box-title">Quoting agent</text>
@@ -89,7 +90,8 @@
   <text x="756" y="538" class="small">only approved item + quantity, once;</text>
   <text x="756" y="554" class="small">reorders stock if needed, then records</text>
   <text x="756" y="570" class="small">the sale at the quoted price (locked)</text>
-  <text x="756" y="594" class="tool">check_cash_balance</text>
+  <text x="756" y="594" class="tool">financial_summary</text>
+  <text x="756" y="610" class="small">cash, inventory, total assets (internal)</text>
 
   <!-- Delegation arrows -->
   <path d="M400,353 L230,426" class="flow"/>
@@ -126,7 +128,7 @@
   <text x="56" y="308" class="box-text">inventory value in</text>
   <text x="56" y="326" class="box-text">test_results.csv</text>
   <text x="56" y="346" class="small">Python checks it against recorded sales;</text>
-  <text x="56" y="360" class="small">unsold lines or a wrong reply: one retry</text>
+  <text x="56" y="360" class="small">unsold lines: 1 retry; wrong reply: up to 2</text>
   <path d="M330,289 L284,289" class="flow"/>
   <text x="286" y="279" class="label">④</text>
 </svg>

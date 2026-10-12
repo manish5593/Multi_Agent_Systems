@@ -32,7 +32,7 @@ Orchestrator agent
   information (stock levels, costs, cash, suppliers, tool errors).
 
 Inventory agent
-  Tools: check_availability
+  Tools: check_availability, list_inventory
   Passes each line of the customer's wording, verbatim, to check_availability,
   which picks the catalog item and checks whether the full quantity can be
   ready by the deadline. Items with no catalog match (e.g. balloons, A3 paper)
@@ -44,7 +44,7 @@ Quoting agent
   similar historical quotes for context. It never invents prices.
 
 Sales agent
-  Tools: record_sale, check_cash_balance
+  Tools: record_sale, financial_summary
   Records a sale for each quoted line. record_sale places any supplier reorder
   that is needed and records the sale at the quoted price.
 
@@ -110,8 +110,21 @@ record_sale(item_name, quantity)                              [writes]
   then writes a sales transaction priced with the same function as
   price_line_item, so the amount charged always matches the quote.
 
-check_cash_balance()
-  The company's cash balance on the request date (internal use).
+list_inventory()                                              [read-only]
+  Uses get_all_inventory to list every item in stock on the request date.
+  Context only for the inventory agent: it approves nothing, and stock
+  levels must not reach the customer.
+
+financial_summary()                                           [read-only]
+  Uses generate_financial_report to give cash, inventory value, total assets
+  and top-selling products on the request date. The sales agent calls it
+  after recording sales to confirm the books updated (internal use).
+
+All seven helper functions in the starter code are used by the agent
+tools: create_transaction, get_stock_level, get_supplier_delivery_date and
+get_cash_balance (via check_availability / record_sale), get_all_inventory
+(list_inventory), generate_financial_report (financial_summary) and
+search_quote_history (search_past_quotes).
 
 
 4. DESIGN DECISIONS
@@ -234,10 +247,11 @@ for a per-request table.
     under 50% ready by deadline:     4 (declined)
     nothing ready by the deadline:   6
     not carried:                     11 (mostly A3/A5 paper)
-  Unsold-line follow-ups:            0 (the previous run needed 1, for
-                                     request 18; the line was then sold)
+  Unsold-line follow-ups:            1 (request 18; the line was then sold)
   Replies rewritten after the
-  reply check:                       7, all passing on the first rewrite
+  reply check:                       5, all passing on the first rewrite
+  New read-only tools used:          list_inventory 7 times,
+                                     financial_summary 19 times
   Final replies failing the check:   0
   Sales priced exactly at cost x 1.25
   less the bulk discount:            39 of 39
@@ -248,10 +262,10 @@ for a per-request table.
   Starting position:  cash $45,059.70, inventory $4,940.30, total $50,000.00
   Final position:     cash $46,706.13, inventory $4,339.85, total $51,045.98
 
-  In the previous run the inventory agent re-checked an item after it was
+  In an earlier run the inventory agent re-checked an item after it was
   sold (stock was then empty, so nothing happened). check_availability now
   refuses to re-approve an item already sold in the same request. No such
-  re-check happened in this run, so the guard has only been tested offline.
+  re-check has happened since, so the guard has only been tested offline.
 
 
 6. KNOWN LIMITATIONS AND POSSIBLE IMPROVEMENTS

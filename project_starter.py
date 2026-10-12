@@ -878,6 +878,19 @@ def _plan_partial(item_name: str, quantity: int) -> Dict:
 # Tools for inventory agent
 
 @tool
+def list_inventory() -> str:
+    """
+    List every item in stock on the date of the current request, with its quantity. For internal
+    context only: it does not approve anything (use check_availability for that), and stock levels
+    must never be quoted to the customer.
+
+    Returns:
+        A JSON object mapping catalog item names to units in stock.
+    """
+    return json.dumps({name: int(units) for name, units in get_all_inventory(_request_date()).items()})
+
+
+@tool
 def check_availability(description: str, quantity: int) -> str:
     """
     Match one requested item to the catalog and check whether the quantity can be ready by the
@@ -1006,20 +1019,29 @@ def _record_sale_locked(item_name: str, quantity: int) -> str:
 
 
 @tool
-def check_cash_balance() -> str:
+def financial_summary() -> str:
     """
-    Get the company's cash balance on the date of the current request. For internal use only.
+    Get the company's financial position on the date of the current request: cash, inventory value,
+    total assets and the top-selling products. For internal use only; never share these figures
+    with the customer.
 
     Returns:
-        The cash balance in dollars.
+        A JSON object with cash_balance, inventory_value, total_assets and top_selling_products.
     """
-    return f"${get_cash_balance(_request_date()):.2f}"
+    report = generate_financial_report(_request_date())
+    return json.dumps({
+        "cash_balance": round(report["cash_balance"], 2),
+        "inventory_value": round(report["inventory_value"], 2),
+        "total_assets": round(report["total_assets"], 2),
+        # Skip the starter's opening-cash entry, which is recorded as a sale with no item
+        "top_selling_products": [row for row in report["top_selling_products"] if row["item_name"]],
+    }, default=str)
 
 
 # Set up your agents and create an orchestration agent that will manage them.
 
 inventory_agent = ToolCallingAgent(
-    tools=[check_availability],
+    tools=[list_inventory, check_availability],
     model=model,
     name="inventory_agent",
     description=(
@@ -1031,6 +1053,8 @@ inventory_agent = ToolCallingAgent(
         "For each requested item, call check_availability exactly once with the customer's description "
         "copied verbatim (e.g. 'colorful cardstock', not a catalog name you chose) and the full quantity. "
         "The tool picks the catalog item itself. Never check alternatives, substitutes or partial quantities. "
+        "You may call list_inventory once for context on what is in stock, but only check_availability "
+        "decides availability, and stock levels must never appear in your answer. "
         "In your final answer, list every item as: customer description | catalog item_name from the tool "
         "(or 'not carried') | requested quantity | available (yes/partial/no) | available_quantity | "
         "ready date | reason if not fully available."
@@ -1059,7 +1083,7 @@ quoting_agent = ToolCallingAgent(
 )
 
 sales_agent = ToolCallingAgent(
-    tools=[record_sale, check_cash_balance],
+    tools=[record_sale, financial_summary],
     model=model,
     name="sales_agent",
     description=(
@@ -1069,6 +1093,8 @@ sales_agent = ToolCallingAgent(
     instructions=(
         "Call record_sale once per line item with the exact item name and quantity; it charges the quoted price. "
         "If it is rejected, retry with a confirmed item it lists. "
+        "After recording the sales, call financial_summary once to confirm the books updated. Its "
+        "figures are internal: do not include them in your final answer. "
         "Finish with which sales succeeded and which failed."
     ),
     max_steps=12,
