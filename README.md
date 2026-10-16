@@ -1,94 +1,123 @@
-# Munder Difflin Multi-Agent System Project
+# Munder Difflin: Multi-Agent Order Processing
 
-Welcome to the starter code repository for the **Munder Difflin Paper Company Multi-Agent System Project**! This repository contains the starter code and tools you will need to design, build, and test a multi-agent system that supports core business operations at a fictional paper manufacturing company.
+A multi-agent system that handles free-text customer orders for a fictional paper company. It matches the
+customer's wording to catalog items, checks what can be ready by their deadline, quotes prices with bulk
+discounts, records the sales, and writes the reply. It runs four agents built with
+[`smolagents`](https://github.com/huggingface/smolagents) on `gpt-4o-mini`, backed by a SQLite database of stock,
+supplier orders and transactions.
 
-## Project Context
+Built for the multi-agent systems project in Udacity's Agentic AI program, where the system could use at most
+five agents.
 
-You’ve been hired as an AI consultant by Munder Difflin Paper Company, a fictional enterprise looking to modernize their workflows. They need a smart, modular **multi-agent system** to automate:
+**Results** from a full run over the 20 sample requests:
 
-- **Inventory checks** and restocking decisions
-- **Quote generation** for incoming sales inquiries
-- **Order fulfillment** including supplier logistics and transactions
+| Metric | Result |
+|---|---|
+| Requests processed without error | 20 / 20 |
+| Requests with at least one sale | 19 / 20 |
+| Sales priced correctly (cost × 1.25, less the bulk discount) | 39 / 39 |
+| Sales below cost | 0 |
+| Replies revealing stock levels, costs, markup or cash | 0 |
+| Total assets | $50,000.00 → $51,045.98 |
 
-Your solution must use a maximum of **5 agents** and process inputs and outputs entirely via **text-based communication**.
+The full breakdown, per request, is in [`report.md`](report.md).
 
-This project challenges your ability to orchestrate agents using modern Python frameworks like `smolagents`, `pydantic-ai`, or `npcsh`, and combine that with real data tools like `sqlite3`, `pandas`, and LLM prompt engineering.
+## How it works
 
----
+![Workflow diagram](workflow_diagram.png)
 
-## What’s Included
+| Agent | Tools | Role |
+|---|---|---|
+| Orchestrator | the three agents below | Pulls the requested items out of the message, delegates to the agents in order, and writes the reply |
+| Inventory agent | `check_availability`, `list_inventory` | Matches each line to one catalog item and checks stock, supplier lead time and cash against the deadline |
+| Quoting agent | `price_line_item`, `search_past_quotes` | Prices approved items: supplier cost plus 25%, less 5%, 10% or 15% bulk discounts |
+| Sales agent | `record_sale`, `financial_summary` | Records each approved line, ordering from the supplier first if needed |
 
-From the `project.zip` starter archive, you will find:
+The main design decision: **the agents decide what to do, and Python does every calculation, match and database
+write.** Almost every bug found in testing came from the model choosing a date, quantity, price or catalog
+item. Each was fixed by moving that choice into code. So in practice:
 
-- `project_starter.py`: The main Python script you will modify to implement your agent system
-- `quotes.csv`: Historical quote data used for reference by quoting agents
-- `quote_requests.csv`: Incoming customer requests used to build quoting logic
-- `quote_requests_sample.csv`: A set of simulated test cases to evaluate your system
+- **Dates:** dates and deadlines are parsed in Python, and the tools don't accept dates at all.
+- **Prices:** quoting and sales share one pricing function.
+- **Approvals:** only items that `check_availability` approved for this request can be sold, and each approval
+  can be used once.
+- **Reply checks:** Python checks the final reply against the recorded sales (the total, partial quantities, and
+  no internal details) and asks for a rewrite if it's wrong.
 
----
+The deterministic logic lives in small modules with no database access, so it can be tested on its own:
+- `matching.py` and `catalog_ranking.py`: catalog matching, with rules first and then an embedding shortlist;
+- `pricing.py`;
+- `fulfillment.py`: full and partial orders;
+- `reply_validation.py`.
 
-## Workspace Instructions
+## What testing changed
 
-All the files have been provided in the VS Code workspace on the Udacity platform. Please install the agent orchestration framework of your choice.
+The system went through about a dozen full test runs. A few of the failures and fixes:
 
-## Local setup instructions
+| What went wrong | Fix |
+|---|---|
+| The model invented dates such as 2023-11-24, causing false "insufficient funds" refusals and negative stock | Dates set in Python; tools take no dates |
+| The orchestrator sold 10 substitute products, about $36,000, for one order | Sales limited to items approved for that request |
+| "250,000 sheets of cardboard" matched "250 gsm cardstock" through the quantity's digits | Quantities stripped before matching |
+| 500 reams quoted as 500 sheets | Reams converted to sheets in Python |
+| Parallel tool calls corrupted the SQLite database | One tool call at a time, and a lock on sale writes |
+| Discounted bulk sales lost money | 25% markup over supplier cost |
+| "post-it notes" and "tablecloths" matched nothing, and "paper clips" matched Paper cups | Embedding shortlist after the rules. On 88 labeled descriptions it now gets 25 of 31 paraphrases (the lexical matcher got 19) and rejects all 16 items the company doesn't sell. |
 
-1. Install dependencies
+The full list, with the reasoning behind each decision, is in [`report.md`](report.md) and
+[`design_notes.txt`](design_notes.txt).
 
-Make sure you have Python 3.8+ installed.
+## Running it
 
-You can install all required packages using the provided requirements.txt file:
+Needs Python 3.11 and an OpenAI-compatible API key. The project was built against the Vocareum proxy at
+`https://openai.vocareum.com/v1`.
 
-`pip install -r requirements.txt`
+```bash
+python3.11 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+echo "UDACITY_OPENAI_API_KEY=<your key>" > .env
+python project_starter.py
+```
 
-If you're using smolagents, install it separately:
+Run it from the project folder. A full run takes about 15–25 minutes. It processes `quote_requests_sample.csv`,
+writes `test_results.csv`, prints the final financial report, and then checks the results automatically.
 
-`pip install smolagents`
+## Tests
 
-For other options like pydantic-ai or npcsh[lite], refer to their documentation.
+These run offline, with no API key:
 
-2. Create .env File
+```bash
+python -m unittest test_validate_results test_catalog_ranking   # 17 tests
+python validate_results.py                                       # checks test_results.csv
+```
 
-Add your OpenAI-compatible API key:
+`python evaluate_matching.py` measures matching accuracy on the labeled descriptions. It calls the embeddings
+API, so it needs the key in `.env`.
 
-`UDACITY_OPENAI_API_KEY=your_openai_key_here`
+`validate_results.py` checks properties every run must satisfy, rather than one run's exact wording:
+- no failed requests;
+- no internal details in any reply;
+- replies consistent with the recorded sales;
+- cash and inventory never negative;
+- total assets never falling between requests.
 
-This project uses a custom OpenAI-compatible proxy hosted at https://openai.vocareum.com/v1.
+## Known limitations
 
-## How to Run the Project
+- **Partial orders:** 12 of 60 lines were only partly filled, mostly because of fixed supplier lead times and
+  low starting stock.
+- **First drafts still fail:** 5 of the 20 first-draft replies failed the reply check and had to be rewritten.
+  The checks catch these, but cost extra LLM calls.
+- **Matching gaps:** some wording still matches the wrong item ("card stock" as two words) or nothing at all
+  ("leaflets").
+- **Agent compliance:** the guards prevent wrong sales, but they can't force a sale the agent skips.
 
-Start by defining your agents in the `"YOUR MULTI AGENT STARTS HERE"` section inside `template.py`. Once your agent team is ready:
+## Files
 
-1. Run the `run_test_scenarios()` function at the bottom of the script.
-2. This will simulate a series of customer requests.
-3. Your system should respond by coordinating inventory checks, generating quotes, and processing orders.
-
-Output will include:
-
-- Agent responses
-- Cash and inventory updates
-- Final financial report
-- A `test_results.csv` file with all interaction logs
-
----
-
-## Tips for Success
-
-- Start by sketching a **flow diagram** to visualize agent responsibilities and interactions.
-- Test individual agent tools before full orchestration.
-- Always include **dates** in customer requests when passing data between agents.
-- Ensure every quote includes **bulk discounts** and uses past data when available.
-- Use the **exact item names** from the database to avoid transaction failures.
-
----
-
-## Submission Checklist
-
-Make sure to submit the following files:
-
-1. Your completed `template.py` or `project_starter.py` with all agent logic
-2. A **workflow diagram** describing your agent architecture and data flow
-3. A `README.txt` or `design_notes.txt` explaining how your system works
-4. Outputs from your test run (like `test_results.csv`)
-
----
+| File | Contents |
+|---|---|
+| `project_starter.py` | Database helpers, tools, agents and the test loop |
+| `matching.py`, `catalog_ranking.py`, `pricing.py`, `fulfillment.py`, `reply_validation.py` | Deterministic logic |
+| `validate_results.py`, `test_*.py`, `evaluate_matching.py` | Result checks, unit tests and matching evaluation |
+| `quote_requests_sample.csv`, `quotes.csv`, `quote_requests.csv` | Sample requests and historical quotes |
+| `test_results.csv` | Results of the latest full run |
+| `report.md`, `design_notes.txt`, `workflow_diagram.png` | Report, design notes and diagram |
